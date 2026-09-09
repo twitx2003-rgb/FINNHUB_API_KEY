@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>התחברות · מעקב הוצאות</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="wrap" style="max-width:380px;padding-top:14vh">
+  <div class="panel">
+    <h1 style="font-size:19px;margin:0 0 4px">מעקב הוצאות</h1>
+    <p class="hint" style="margin:0 0 18px">הזן את הסיסמה כדי להיכנס.</p>
+    <form id="login-form">
+      <div class="field">
+        <label for="password">סיסמה</label>
+        <input id="password" type="password" autocomplete="current-password" required autofocus>
+      </div>
+      <p class="hint" id="error" style="color:var(--danger)" hidden></p>
+      <button class="primary" type="submit" style="width:100%">כניסה</button>
+    </form>
+  </div>
+</div>
+<script>
+document.getElementById('login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const error = document.getElementById('error');
+  error.hidden = true;
+  const response = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: document.getElementById('password').value }),
+  });
+  if (response.ok) { location.href = '/'; return; }
+  const data = await response.json().catch(() => ({}));
+  error.textContent = data.error || 'ההתחברות נכשלה';
+  error.hidden = false;
+});
+</script>
+</body>
+</html>

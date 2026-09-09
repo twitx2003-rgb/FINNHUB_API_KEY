@@ -1,0 +1,26 @@
+{
+  "name": "mail-expense-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted expense tracker that reads purchase and charge emails from your mailbox",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js",
+    "sync": "node src/cli/sync.js",
+    "set-password": "node src/cli/set-password.js"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-session": "^1.18.1",
+    "imapflow": "^1.0.171",
+    "mailparser": "^3.7.1"
+  }
+}

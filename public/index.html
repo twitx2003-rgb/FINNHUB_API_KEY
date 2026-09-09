@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>מעקב הוצאות</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>💸</text></svg>">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>מעקב הוצאות</h1>
+    <span class="status-pill" id="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">טוען…</span></span>
+    <span class="spacer"></span>
+    <select id="range" aria-label="טווח זמן">
+      <option value="6">6 חודשים אחרונים</option>
+      <option value="12" selected>12 חודשים אחרונים</option>
+      <option value="24">24 חודשים אחרונים</option>
+    </select>
+    <button id="add-btn">+ הוצאה ידנית</button>
+    <button id="sync-btn" class="primary">סנכרן עכשיו</button>
+  </header>
+
+  <section id="setup" class="setup panel" hidden>
+    <h2>חיבור לתיבת הדואר</h2>
+    <p class="hint" id="setup-text"></p>
+    <p><a class="btn" id="connect-link" href="/oauth/start">חיבור לחשבון Gmail</a></p>
+  </section>
+
+  <section class="cards">
+    <div class="card"><div class="label">הוצאות החודש</div><div class="value" id="kpi-month">—</div><div class="sub" id="kpi-month-sub"></div></div>
+    <div class="card"><div class="label">ממוצע חודשי</div><div class="value" id="kpi-avg">—</div><div class="sub" id="kpi-avg-sub"></div></div>
+    <div class="card"><div class="label">סה״כ עסקאות</div><div class="value" id="kpi-count">—</div><div class="sub" id="kpi-count-sub"></div></div>
+    <div class="card"><div class="label">ממתין לאישור</div><div class="value" id="kpi-review">—</div><div class="sub">עסקאות בביטחון נמוך</div></div>
+  </section>
+
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-head"><h2>הוצאות לפי חודש</h2></div>
+      <div id="chart-months"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>לפי קטגוריה</h2></div>
+      <div id="chart-categories"></div>
+      <ul class="legend" id="legend-categories"></ul>
+    </div>
+  </div>
+
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-head"><h2>בתי עסק מובילים</h2></div>
+      <ul class="legend" id="top-merchants"></ul>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>תקציבים חודשיים</h2><span class="spacer"></span>
+        <button class="ghost" id="budget-btn">הגדר</button>
+      </div>
+      <div id="budgets"></div>
+      <div class="panel-head" style="margin-top:22px"><h2>כללי קטגוריות</h2><span class="spacer"></span><button class="ghost" id="rule-btn">+ כלל</button></div>
+      <ul class="rules-list" id="rules"></ul>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>עסקאות</h2><span class="spacer"></span>
+      <a class="btn" id="export-link" href="/api/export.csv">ייצוא CSV</a>
+    </div>
+    <div class="filters">
+      <input type="search" id="q" placeholder="חיפוש בית עסק או נושא…">
+      <select id="f-category"><option value="">כל הקטגוריות</option></select>
+      <select id="f-status">
+        <option value="">הכל (חוץ ממוסתר)</option>
+        <option value="confirmed">מאושר</option>
+        <option value="review">לבדיקה</option>
+        <option value="ignored">מוסתר</option>
+      </select>
+      <input type="date" id="f-from" aria-label="מתאריך">
+      <input type="date" id="f-to" aria-label="עד תאריך">
+    </div>
+    <div id="tx-container"></div>
+  </div>
+</div>
+
+<dialog id="add-dialog">
+  <h3>הוצאה ידנית</h3>
+  <form method="dialog" id="add-form">
+    <div class="field"><label for="a-merchant">בית עסק</label><input id="a-merchant" required></div>
+    <div class="field"><label for="a-amount">סכום (שלילי = החזר)</label><input id="a-amount" type="number" step="0.01" required></div>
+    <div class="field"><label for="a-date">תאריך</label><input id="a-date" type="date" required></div>
+    <div class="field"><label for="a-category">קטגוריה</label><select id="a-category"></select></div>
+    <div class="field"><label for="a-note">הערה</label><input id="a-note"></div>
+    <div class="dialog-actions">
+      <button type="button" class="ghost" data-close>ביטול</button>
+      <button type="submit" class="primary">הוסף</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="rule-dialog">
+  <h3>כלל קטגוריה</h3>
+  <p class="hint">כל עסקה שהשדה שנבחר מכיל את הטקסט תקבל את הקטגוריה הזו — גם בסנכרונים הבאים.</p>
+  <form method="dialog" id="rule-form">
+    <div class="field"><label for="r-field">שדה</label>
+      <select id="r-field"><option value="merchant">בית עסק</option><option value="subject">נושא המייל</option><option value="sender">שולח</option></select>
+    </div>
+    <div class="field"><label for="r-pattern">מכיל את הטקסט</label><input id="r-pattern" required></div>
+    <div class="field"><label for="r-category">קטגוריה</label><select id="r-category"></select></div>
+    <label class="hint"><input type="checkbox" id="r-apply" checked> החל גם על עסקאות קיימות</label>
+    <div class="dialog-actions">
+      <button type="button" class="ghost" data-close>ביטול</button>
+      <button type="submit" class="primary">שמור</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="budget-dialog">
+  <h3>תקציב חודשי</h3>
+  <form method="dialog" id="budget-form">
+    <div class="field"><label for="b-category">קטגוריה</label><select id="b-category"></select></div>
+    <div class="field"><label for="b-limit">תקרה חודשית (0 = הסרה)</label><input id="b-limit" type="number" step="1" min="0" required></div>
+    <div class="dialog-actions">
+      <button type="button" class="ghost" data-close>ביטול</button>
+      <button type="submit" class="primary">שמור</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
