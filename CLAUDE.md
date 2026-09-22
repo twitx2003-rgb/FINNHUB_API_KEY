@@ -210,7 +210,13 @@ writing code against it. Do not trust README summaries or memory.
     working (they fail with the plain provider). Headless sign-in errors now say why
     (no refresh token / refresh refused / rejected) and the SDK's traceback for that
     case is filtered. `run.py --tradingview-token-status` shows the stored state, no
-    secrets. Unknown yet: whether TradingView issues refresh tokens at all.
+    secrets. TradingView does issue refresh tokens; access tokens last **900 s**.
+  - **Second live run: refresh went to `https://mcp.tradingview.com/token` -> 404.**
+    Second SDK gap: a refresh before any 401 runs before metadata discovery, so the SDK
+    falls back to `<MCP host>/token`. Real endpoint: `www.tradingview.com/mcp/oauth/token`.
+    Fix: `_StoredExpiryAuth._discover_for_refresh` runs the SDK's own PRM + AS metadata
+    discovery (with our User-Agent) whenever a refresh is about to happen. The fake
+    server's token endpoint moved to `/oauth/token` so tests can't pass by the guess.
   - **Next:** once the scanner answers, map the two payloads -> Phase 2 done ->
     stop for review. Earlier line kept for history: `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),

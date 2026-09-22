@@ -385,11 +385,17 @@ def _why_sign_in(status: dict) -> str:
 
 
 def _stored_expiry_auth():
-    """OAuthClientProvider that restores the stored token's expiry on load.
+    """OAuthClientProvider that can refresh a stored token in a new process.
 
-    Without this, a run after the access token expired sends the stale token,
-    gets 401, and the SDK goes straight to a browser sign-in — the refresh token
-    is never tried. With the expiry known, the SDK refreshes first.
+    Two SDK gaps (mcp 2.2), both hit live with TradingView's 15-minute tokens:
+
+    1. Stored tokens are loaded without their expiry, so an expired access token
+       counts as valid, is sent, gets 401, and the SDK goes straight to a browser
+       sign-in — the refresh token is never tried. Fixed by restoring the expiry.
+    2. A refresh that happens before any 401 runs before metadata discovery, so
+       the SDK guesses the token endpoint as <MCP host>/token (404 on TradingView,
+       whose endpoint is www.tradingview.com/mcp/oauth/token). Fixed by
+       discovering the metadata first whenever a refresh is about to happen.
     """
     from mcp.client.auth import OAuthClientProvider
 
@@ -401,6 +407,49 @@ def _stored_expiry_auth():
                 when = expires_at()
                 if when is not None:
                     self.context.token_expiry_time = when
+            if (not self.context.is_token_valid() and self.context.can_refresh_token()
+                    and self.context.oauth_metadata is None):
+                await self._discover_for_refresh()
+
+        async def _discover_for_refresh(self) -> None:
+            """The SDK's own discovery sequence, run ahead of the refresh."""
+            import httpx2
+            from mcp.client.auth.utils import (
+                build_oauth_authorization_server_metadata_discovery_urls,
+                build_protected_resource_metadata_discovery_urls,
+                create_oauth_metadata_request,
+                handle_auth_metadata_response,
+                handle_protected_resource_response,
+            )
+
+            ctx = self.context
+            try:
+                async with httpx2.AsyncClient(
+                        timeout=20, event_hooks={"request": [_identify_request]}) as http:
+                    for url in build_protected_resource_metadata_discovery_urls(None, ctx.server_url):
+                        prm = await handle_protected_resource_response(
+                            await http.send(create_oauth_metadata_request(url)))
+                        if prm:
+                            ctx.protected_resource_metadata = prm
+                            ctx.auth_server_url = self._select_authorization_server(
+                                [str(u) for u in prm.authorization_servers])
+                            break
+                    for url in build_oauth_authorization_server_metadata_discovery_urls(
+                            ctx.auth_server_url, ctx.server_url):
+                        keep_trying, asm = await handle_auth_metadata_response(
+                            await http.send(create_oauth_metadata_request(url)))
+                        if asm is not None:
+                            ctx.oauth_metadata = asm
+                            break
+                        if not keep_trying:
+                            break
+            except Exception as exc:  # noqa: BLE001 — the refresh then fails and says so
+                log.warning("could not look up TradingView's token endpoint before refreshing: %s",
+                            exc)
+                return
+            if ctx.oauth_metadata is None:
+                log.warning("TradingView's OAuth metadata was not found; the token refresh "
+                            "will likely fail")
 
     return _StoredExpiryAuth
 

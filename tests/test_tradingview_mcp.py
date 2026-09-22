@@ -93,7 +93,9 @@ class FakeAuthServer:
             meta = {
                 "issuer": base,
                 "authorization_endpoint": f"{base}/authorize",
-                "token_endpoint": f"{base}/token",
+                # Not at /token: TradingView's is /mcp/oauth/token on another host, and
+                # the SDK's refresh-before-discovery guessed <mcp host>/token (live 404).
+                "token_endpoint": f"{base}/oauth/token",
                 "response_types_supported": ["code"],
                 "grant_types_supported": ["authorization_code", "refresh_token"],
                 "code_challenge_methods_supported": ["S256"],
@@ -122,7 +124,7 @@ class FakeAuthServer:
             body = await request.json()
             self.registrations.append(body)
             resp = JSONResponse({**body, "client_id": "client-123"}, status_code=201)
-        elif path == "/token":
+        elif path == "/oauth/token":
             form = dict(await request.form())
             self.token_requests.append(form)
             if form.get("grant_type") == "refresh_token":
@@ -501,3 +503,19 @@ def test_refused_refresh_explains_why_a_sign_in_is_needed(auth_server, tmp_path)
 def test_token_status_never_contains_secrets(auth_server, tmp_path):
     status = json.dumps(_sign_in(auth_server, tmp_path).status())
     assert "access-token" not in status and "refresh-1" not in status
+
+
+def test_refresh_behind_bot_protection_finds_the_real_token_endpoint(tmp_path):
+    server = FakeAuthServer(waf=True)
+    server.start()
+    try:
+        storage = _sign_in(server, tmp_path)
+        _expire(storage, server)
+        _client(server, tmp_path, interactive=False).list_tools()
+        assert server.token_requests[-1]["grant_type"] == "refresh_token"
+        blocked = [path for path, agent in server.user_agents
+                   if path != "/authorize" and not agent.startswith("market-research-pipeline")]
+        assert blocked == []
+        assert not any(path == "/token" for path, _ in server.user_agents)   # no guessed endpoint
+    finally:
+        server.stop()
