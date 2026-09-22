@@ -25,7 +25,7 @@ before the next one starts.
 
 ```
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m pytest -q                     # 70 offline tests
+.venv\Scripts\python.exe -m pytest -q                     # 72 offline tests
 .venv\Scripts\python.exe run.py --selftest                # install check, no key/network
 .venv\Scripts\python.exe run.py --ticker NVDA --stages data
 .venv\Scripts\python.exe run.py --ticker NVDA --stages all
@@ -113,15 +113,27 @@ writing code against it. Do not trust README summaries or memory.
   - **LSE has no earnings dates at all** (no mention anywhere in the client). The primary
     next-earnings date comes from Yahoo (`Ticker.calendar["Earnings Date"]`, a list — two
     dates mean an unconfirmed window). Market cap comes from LSE `fundamentals()`.
-  - **First live sign-in failed:** `OAuthRegistrationError: Registration failed: 404`.
-    TradingView's AS metadata evidently has no `registration_endpoint`, so the SDK fell back
-    to guessing `/register`. The mcp SDK also supports a Client ID Metadata Document
-    (`OAuthClientProvider(client_metadata_url=...)`), used only when the AS advertises
-    `client_id_metadata_document_supported`. `run.py --tradingview-diagnose` prints what the
-    server advertises; the next step depends on it.
-  - **Waiting on live discovery from the user:** `--auth-tradingview`,
-    `--tradingview-tools` (tool names and schemas are unknown — public beta), and
-    `--discover-fundamentals NVDA` (LSE market-cap field name and unit).
+  - **First live sign-in failed, cause found:** TradingView *does* support dynamic client
+    registration (`--tradingview-diagnose`: AS `https://www.tradingview.com`, registration
+    at `/mcp/oauth/register`, PKCE S256, scopes `mcp:read mcp:tools`, no client ID metadata
+    documents). But its sign-in host is behind bot protection: the mcp SDK builds OAuth
+    discovery/registration requests as bare `Request`s with no User-Agent/Accept, those got
+    403, and the SDK then guessed `/register` on the MCP host and got 404. Fix: an httpx2
+    request hook (`_identify_request`) sets User-Agent + Accept on every request, including
+    the OAuth flow's own. `--tradingview-diagnose` now sends the metadata request both ways
+    and prints both statuses. Tests reproduce the block with a stand-in.
+  - **Live provider shapes (from `--discover-fundamentals NVDA`):**
+    - LSE `fundamentals()`: keys `beta country currency current_price description
+      dividend_yield exchange industry ipo_date logo_url market_cap name pe_ratio
+      profit_margin revenue_ttm sector symbol updated_at website week_52_high week_52_low`.
+      `market_cap` is in raw USD (not millions). It is a snapshot: `current_price` was the
+      previous session's close, and `week_52_high` was *below* `current_price` — some fields
+      are stale. So compare market cap at a common price (or compare implied shares), not
+      raw values from different days.
+    - Yahoo `calendar`: `Earnings Date` came back as a single date (confirmed date); also
+      EPS/revenue estimate ranges and dividend dates.
+  - **Waiting on live discovery from the user:** `--auth-tradingview` (with the header
+    fix) and `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),
     the validate stage (close / market cap / next earnings vs TradingView, tolerances from
     `config.yaml`, write `validation.json`, raise `PipelineHalt` on any failed or

@@ -41,6 +41,14 @@ from ..errors import PipelineError, ProviderError
 log = logging.getLogger(__name__)
 
 DEFAULT_URL = "https://mcp.tradingview.com/mcp"
+
+# TradingView's sign-in host (www.tradingview.com) sits behind bot protection. The
+# mcp SDK builds its OAuth discovery/registration requests as bare Requests with
+# no User-Agent and no Accept header, and the first live sign-in got 403 on
+# discovery — after which the SDK guessed a /register URL and failed with 404.
+# The same metadata URL returned 200 to a request carrying these headers, so
+# every request this client sends gets them.
+USER_AGENT = "market-research-pipeline/0.2 (personal research)"
 _CALLBACK_PATH = "/callback"
 _SIGN_IN_TIMEOUT_S = 300
 
@@ -221,7 +229,11 @@ class TradingViewMCP:
         if self.interactive:
             self._callback.start()
         try:
-            async with create_mcp_http_client(auth=auth) as http:
+            http = create_mcp_http_client(auth=auth)
+            # Request hooks run on every send, including the OAuth flow's own
+            # requests, which is the only way to reach those headers.
+            http.event_hooks["request"].append(_identify_request)
+            async with http:
                 async with Client(streamable_http_client(self.url, http_client=http),
                                   cache=None) as client:
                     yield client
@@ -249,6 +261,12 @@ class TradingViewMCP:
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         return _run(self.call_tool_async(name, arguments))
+
+
+async def _identify_request(request) -> None:
+    request.headers["User-Agent"] = USER_AGENT
+    if "accept" not in request.headers:
+        request.headers["Accept"] = "application/json"
 
 
 def _run(coro):
@@ -299,7 +317,7 @@ def _fetch_json(url: str, timeout: float = 20) -> tuple[int | None, Any]:
     import urllib.request
 
     req = urllib.request.Request(url, headers={"Accept": "application/json",
-                                               "User-Agent": "market-research-pipeline"})
+                                               "User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -320,6 +338,32 @@ def _metadata_urls(issuer: str) -> list[str]:
                 f"{root}{path}/.well-known/openid-configuration"]
     return [f"{root}/.well-known/oauth-authorization-server",
             f"{root}/.well-known/openid-configuration"]
+
+
+def _compare_headers(url: str) -> list[str]:
+    """Send one metadata request exactly as the mcp SDK builds it, and once with
+    this client's headers, and report both statuses."""
+    import httpx2
+    from mcp.client.auth.utils import create_oauth_metadata_request
+
+    async def probe() -> list[str]:
+        lines = []
+        async with httpx2.AsyncClient(timeout=20) as client:
+            bare = create_oauth_metadata_request(url)       # the SDK's own builder
+            ours = create_oauth_metadata_request(url)
+            await _identify_request(ours)
+            for label, request in (("as the SDK sends it  ", bare), ("with our headers      ", ours)):
+                try:
+                    response = await client.send(request)
+                    lines.append(f"{label}-> {response.status_code}")
+                except Exception as exc:  # noqa: BLE001
+                    lines.append(f"{label}-> {type(exc).__name__}: {exc}")
+        return lines
+
+    try:
+        return asyncio.run(probe())
+    except Exception as exc:  # noqa: BLE001
+        return [f"header check failed: {type(exc).__name__}: {exc}"]
 
 
 def diagnose(url: str = DEFAULT_URL) -> list[str]:
@@ -355,6 +399,9 @@ def diagnose(url: str = DEFAULT_URL) -> list[str]:
         if meta is None:
             out.append(f"No authorization-server metadata found for {issuer}.")
             continue
+        out.append("")
+        out.append(f"header check on {candidate}:")
+        out.extend(f"  {line}" for line in _compare_headers(candidate))
         out.append("")
         out.append(f"summary for {issuer}:")
         out.append(f"  dynamic client registration : "

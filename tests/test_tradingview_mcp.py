@@ -55,8 +55,10 @@ class FakeAuthServer:
 
     TOKEN = "access-token-1"
 
-    def __init__(self, dcr: bool = True):
-        self.dcr = dcr                       # False: behave like TradingView (no registration)
+    def __init__(self, dcr: bool = True, waf: bool = False):
+        self.dcr = dcr                       # False: no registration endpoint at all
+        self.waf = waf                       # True: 403 for requests without a known User-Agent
+        self.user_agents: list[str] = []
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.registrations: list[dict] = []
@@ -73,6 +75,11 @@ class FakeAuthServer:
 
         path, base = scope["path"], self.base
         request = Request(scope, receive)
+        agent = request.headers.get("user-agent", "")
+        self.user_agents.append(agent)
+        if self.waf and not agent.startswith("market-research-pipeline"):
+            # like TradingView's bot protection: the SDK's bare requests get 403
+            return await Response(status_code=403)(scope, receive, send)
 
         if path.startswith("/.well-known/oauth-protected-resource"):
             resp = JSONResponse({"resource": f"{base}/mcp", "authorization_servers": [base]})
@@ -262,5 +269,32 @@ def test_server_without_registration_gets_an_actionable_error(tmp_path):
         assert "dynamic client registration : NO" in "\n".join(diagnose(f"{server.base}/mcp"))
         with pytest.raises(ProviderError, match="--tradingview-diagnose"):
             _client(server, tmp_path, interactive=True).list_tools()
+    finally:
+        server.stop()
+
+
+# ------------------------------------------------------------- bot protection
+def test_sdk_bare_request_is_blocked_but_ours_passes():
+    """Reproduces the live finding: 403 for the SDK's discovery request, 200 for ours."""
+    from pipeline.providers.tradingview_mcp import _compare_headers
+
+    server = FakeAuthServer(waf=True)
+    server.start()
+    try:
+        lines = _compare_headers(f"{server.base}/.well-known/oauth-authorization-server")
+        assert "403" in lines[0] and "as the SDK sends it" in lines[0]
+        assert "200" in lines[1] and "with our headers" in lines[1]
+    finally:
+        server.stop()
+
+
+def test_sign_in_succeeds_behind_bot_protection(tmp_path):
+    server = FakeAuthServer(waf=True)
+    server.start()
+    try:
+        tools = _client(server, tmp_path, interactive=True).list_tools()
+        assert [t.name for t in tools] == ["get_quote"]
+        assert server.registrations, "registration must reach the real endpoint"
+        assert all(a.startswith("market-research-pipeline") for a in server.user_agents)
     finally:
         server.stop()
