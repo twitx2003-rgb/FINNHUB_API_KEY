@@ -18,7 +18,7 @@ output, so any stage can be rerun on its own.
 |---|---|---|
 | 1 | `data` | **done** — accepted against live data |
 | 2 | `validate` | **done** — close, market cap and earnings checked against TradingView |
-| 3 | `forecast` (TimesFM) | **built, awaiting the first live run** — volume band + rolling backtest |
+| 3 | `forecast` (TimesFM) | **done, awaiting review** — volume band beat the naive forecast in a 60-window backtest |
 | 4 | `docs`, `extract` | planned |
 | 5 | `forecast` (Kronos), `debate`, `report` | planned |
 

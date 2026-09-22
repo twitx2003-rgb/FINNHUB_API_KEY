@@ -117,8 +117,11 @@ writing code against it. Do not trust README summaries or memory.
   `logs/tradingview_payloads/` into saved answers dated by file mtime (one-off bootstrap).
 - **Phase 3 (forecast, TimesFM): BUILT; model verified on the user's machine** —
   `--check-timesfm` continued a known wave with mean error 0.03 (amplitude 10);
-  weights 1.32 GB, first load 164 s incl. download; forecast < 1 s. First NVDA run
-  still pending (validate halted on the scanner 429). Phase 2 was
+  weights 1.32 GB, first load 164 s incl. download; forecast < 1 s.
+  **First live NVDA run (2026-09-23): DONE, awaiting the user's review.** Backtest, 60
+  windows x 5 sessions: median error 18.4% vs naive 23.2% (skill +20.5%); the 80% band
+  held 86% of the time (slightly conservative). Checkpoint pinned in config.yaml to the
+  HF commit the run downloaded (`timesfm_revision: 43046b85...`). Phase 2 was
   approved by the user. API read from the timesfm 3.0.2 wheel source, not the README:
   `from timesfm3 import TimesFM3Forecaster`; `.from_pretrained("google/timesfm-3.0-pytorch",
   device=, revision=, per_core_batch_size=)`; `.config.quantiles` = 0.1..0.9;
