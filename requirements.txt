@@ -30,6 +30,7 @@ timesfm[torch]==3.0.2
 pymupdf>=1.27
 pillow>=10.0
 transformers>=5.0,<6
+torchvision                  # Qwen3-VL's processor imports it (found on the first live load); pip matches it to torch
 
 # Tests
 pytest>=8.0
