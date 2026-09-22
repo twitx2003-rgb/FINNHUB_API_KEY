@@ -29,7 +29,7 @@ def require_validation_pass(ctx: RunContext) -> dict:
     status = report.get("status")
     if status != "pass":
         failed = [f"{c.get('name')}={c.get('status')}" for c in report.get("checks", [])
-                  if c.get("status") != "pass"]
+                  if c.get("status") not in ("pass", "warn")]
         raise PipelineHalt(
             f"Validation status is '{status}' for {ctx.ticker} {ctx.run_date}"
             + (f" (failed: {', '.join(filter(None, failed))})" if failed else "")

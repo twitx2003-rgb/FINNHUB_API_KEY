@@ -15,6 +15,13 @@ data:
   ohlcv_timeframe: "1d"
   ohlcv_lookback_days: 730
 
+  # LSE's own daily bar covers 04:00-20:00 New York: its close is the last
+  # after-hours trade and its volume includes pre-market and after-hours
+  # (checked with run.py --discover-session). "regular" rebuilds each day from
+  # 30-minute candles, 09:30-16:00 (13:00 on half-days) — the definition
+  # TradingView and most sources use. "extended" keeps LSE's bar.
+  daily_session: regular
+
   # The newest bar must be no older than this, or the stage fails.
   # This is the guard against lse-data's order="asc" default silently handing
   # back the START of history (US equities go back to 2003).

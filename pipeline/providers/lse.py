@@ -18,6 +18,7 @@ order explicitly and verify the response really is descending.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
@@ -35,18 +36,26 @@ from .base import (
 log = logging.getLogger(__name__)
 
 _MAX_ROWS = 5000  # lse-data clamps limit server-side with min(int(limit), 5000)
+# Regular-session bars are rebuilt from these. 30 minutes lines up with 09:30 and
+# 16:00; a day is 04:00-20:00 = 32 bars, so a 120-day window is ~2,700 rows.
+_SESSION_TIMEFRAME, _SESSION_MINUTES = "30m", 30
+_WINDOW_DAYS = 120
 
 
 class LSEProvider(MarketDataProvider):
     name = "lse"
 
-    def __init__(self, api_key: str | None = None, timeout: float = 60.0):
+    def __init__(self, api_key: str | None = None, timeout: float = 60.0,
+                 daily_session: str = "regular", market_tz: str = "America/New_York"):
         try:
             from lse import LSE, LSEError  # noqa: N811
         except ImportError as exc:  # pragma: no cover
             raise ProviderError("lse-data is not installed — pip install lse-data") from exc
         self._LSEError = LSEError
         self._client = LSE(api_key=api_key, timeout=timeout)
+        self.daily_session = daily_session
+        self.market_tz = market_tz
+        self.session_report: dict | None = None
 
     def _call(self, method: str, /, **kwargs) -> list[dict[str, Any]]:
         try:
@@ -59,6 +68,73 @@ class LSEProvider(MarketDataProvider):
 
     # ------------------------------------------------------------------ OHLCV
     def daily_ohlcv(self, symbol: str, lookback_days: int) -> pd.DataFrame:
+        """Daily bars. `daily_session="regular"` (default) rebuilds them from
+        30-minute candles, 09:30-16:00 New York, because the vendor's own daily
+        bar covers 04:00-20:00: its close is the last after-hours trade (verified
+        live with run.py --discover-session). "extended" keeps the vendor bar."""
+        if self.daily_session == "regular":
+            return self._regular_session_daily(symbol, lookback_days)
+        return self._vendor_daily(symbol, lookback_days)
+
+    def _regular_session_daily(self, symbol: str, lookback_days: int) -> pd.DataFrame:
+        from ..session_check import regular_session_daily
+
+        intraday = self._intraday_history(symbol, _SESSION_TIMEFRAME, lookback_days)
+        if intraday.empty:
+            raise ProviderError(f"lse-data candles(): no {_SESSION_TIMEFRAME} bars for '{symbol}'")
+        try:
+            daily, report = regular_session_daily(intraday, symbol, bar_minutes=_SESSION_MINUTES,
+                                                  market_tz=self.market_tz)
+        except ValueError as exc:
+            raise ProviderError(f"lse candles({symbol}): {exc}") from exc
+        self.session_report = report
+        log.info("lse %s: %d regular-session days built from %d %s bars (%d early-close)",
+                 symbol, report["days"], len(intraday), _SESSION_TIMEFRAME,
+                 len(report["early_close_days"]))
+        if report["dropped_incomplete"]:
+            log.warning("lse %s: dropped %d day(s) missing their first or last regular bar: %s",
+                        symbol, len(report["dropped_incomplete"]),
+                        ", ".join(report["dropped_incomplete"][:10]))
+        if report["days_with_gaps"]:
+            log.warning("lse %s: %d day(s) have missing bars inside the session (open and close "
+                        "are intact): %s", symbol, len(report["days_with_gaps"]),
+                        ", ".join(report["days_with_gaps"][:10]))
+        if daily.empty:
+            raise ProviderError(f"lse candles({symbol}): no complete regular sessions")
+        return daily
+
+    def _intraday_history(self, symbol: str, timeframe: str, lookback_days: int) -> pd.DataFrame:
+        """Intraday candles for the whole lookback, in fixed date windows.
+
+        Windows overlap by a day on each side (whether `start`/`end` are
+        inclusive is not documented) and rows are de-duplicated. A window that
+        comes back at the row cap is an error, never a silent truncation.
+        """
+        today = datetime.now(timezone.utc).date()
+        first = today - timedelta(days=lookback_days)
+        frames = []
+        cursor = first
+        while cursor <= today:
+            window_end = min(cursor + timedelta(days=_WINDOW_DAYS), today + timedelta(days=1))
+            rows = self._call("candles", symbol=symbol, timeframe=timeframe,
+                              start=(cursor - timedelta(days=1)).isoformat(),
+                              end=(window_end + timedelta(days=1)).isoformat(),
+                              limit=_MAX_ROWS, order="desc")
+            if len(rows) >= _MAX_ROWS:
+                raise ProviderError(
+                    f"lse candles({symbol}, {timeframe}) {cursor}..{window_end}: {_MAX_ROWS}-row "
+                    "cap reached, so the window is truncated — shrink _WINDOW_DAYS")
+            if rows:
+                assert_descending(rows, "timestamp", context=f"lse candles({symbol}, {timeframe})")
+                frames.append(_candle_frame(rows, f"lse candles({symbol}, {timeframe})"))
+            cursor = window_end
+        if not frames:
+            return _candle_frame([], "")
+        out = pd.concat(frames, ignore_index=True)
+        out = out.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
+        return out[out["timestamp"].dt.date >= first].reset_index(drop=True)
+
+    def _vendor_daily(self, symbol: str, lookback_days: int) -> pd.DataFrame:
         rows = self._call(
             "candles",
             symbol=symbol,
@@ -97,21 +173,7 @@ class LSEProvider(MarketDataProvider):
         if len(rows) >= _MAX_ROWS:
             raise ProviderError(f"lse candles({symbol}, {timeframe}): {_MAX_ROWS}-row cap hit; "
                                 "narrow the window")
-        context = f"lse candles({symbol}, {timeframe})"
-        frame = pd.DataFrame({
-            "timestamp": [pick(r, ("timestamp", "ts"), context=context) for r in rows],
-            "open": [pick(r, ("open", "o"), context=context) for r in rows],
-            "high": [pick(r, ("high", "h"), context=context) for r in rows],
-            "low": [pick(r, ("low", "l"), context=context) for r in rows],
-            "close": [pick(r, ("close", "c"), context=context) for r in rows],
-            "volume": [pick_optional(r, ("volume", "v"), 0.0) for r in rows],
-        })
-        if frame.empty:
-            return frame
-        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, format="mixed")
-        for column in ("open", "high", "low", "close", "volume"):
-            frame[column] = pd.to_numeric(frame[column], errors="coerce")
-        return frame.sort_values("timestamp").reset_index(drop=True)
+        return _candle_frame(rows, f"lse candles({symbol}, {timeframe})")
 
     # ---------------------------------------------------------------- options
     def options_chain(self, underlying: str, max_dte: int) -> pd.DataFrame:
@@ -310,6 +372,22 @@ class LSEProvider(MarketDataProvider):
     def list_economics(self) -> list[dict[str, Any]]:
         """Catalogue of macro series — used by `run.py --discover-macro`."""
         return self._call("economics")
+
+
+def _candle_frame(rows: list[dict], context: str) -> pd.DataFrame:
+    """Candle rows -> timestamp/open/high/low/close/volume, oldest first."""
+    frame = pd.DataFrame({
+        "timestamp": [pick(r, ("timestamp", "ts"), context=context) for r in rows],
+        "open": [pick(r, ("open", "o"), context=context) for r in rows],
+        "high": [pick(r, ("high", "h"), context=context) for r in rows],
+        "low": [pick(r, ("low", "l"), context=context) for r in rows],
+        "close": [pick(r, ("close", "c"), context=context) for r in rows],
+        "volume": [pick_optional(r, ("volume", "v"), 0.0) for r in rows],
+    }, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, format="mixed")
+    for column in ("open", "high", "low", "close", "volume"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    return frame.sort_values("timestamp").reset_index(drop=True)
 
 
 def _time_key(row: dict, context: str) -> str:

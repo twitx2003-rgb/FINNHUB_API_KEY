@@ -12,6 +12,11 @@ Three checks, each ending as pass, fail or unverifiable:
 
 Anything other than a pass halts the run. "Unverifiable" halts too: a check that
 could not run has not passed, and the reason is written to the report.
+
+One exception, chosen by the user: when the earnings dates disagree and at least
+one of them is visibly an estimate (a weekend date, or a date window), the check
+ends as "warn". The run continues, the date is recorded as unconfirmed, and later
+stages must not present it as fact. Two firm dates that disagree still fail.
 """
 from __future__ import annotations
 
@@ -31,7 +36,8 @@ from .data import REFERENCE_ARTIFACT
 
 log = logging.getLogger(__name__)
 
-PASS, FAIL, UNVERIFIABLE = "pass", "fail", "unverifiable"
+PASS, FAIL, UNVERIFIABLE, WARN = "pass", "fail", "unverifiable", "warn"
+OK_STATUSES = (PASS, WARN)
 TV_BAR_COUNT = 10
 
 
@@ -103,22 +109,41 @@ def check_market_cap(ref: dict, theirs: dict, tolerance_pct: float) -> dict:
 
 
 def check_earnings(ref: dict, theirs: dict, tolerance_days: int) -> dict:
-    """Their date must fall inside our date (or window) widened by the tolerance."""
+    """Their date must fall inside our date (or window) widened by the tolerance.
+
+    Disagreement where either side is visibly an estimate is a warning, not a
+    failure: the date is then marked unconfirmed (`confirmed: False`).
+    """
     name = "next_earnings"
     ours = [date.fromisoformat(d) for d in ref["dates"]]
     their_day = date.fromisoformat(theirs["date"])
     low, high = min(ours), max(ours)
     off = max((low - their_day).days, (their_day - high).days, 0)
-    status = PASS if off <= tolerance_days else FAIL
     window = low.isoformat() if low == high else f"{low}..{high}"
-    # Companies report on trading days; a weekend date is a placeholder estimate.
-    weekend = [f"{who} date {d} is a {d:%A}" for who, d in
+
+    # Companies report on trading days, so a weekend date is a placeholder; a
+    # window (Yahoo gives two dates when unconfirmed) is an estimate by definition.
+    reasons = [f"{who} date {d} is a {d:%A}" for who, d in
                (("our", low), ("our", high), ("their", their_day)) if d.weekday() >= 5]
-    note = f" — {'; '.join(dict.fromkeys(weekend))}, so likely an estimate" if weekend else ""
+    if low != high:
+        reasons.append(f"our date is a window ({window})")
+    reasons = list(dict.fromkeys(reasons))
+    estimated = bool(reasons)
+
+    if off <= tolerance_days:
+        status, confirmed = PASS, not estimated
+    elif estimated:
+        status, confirmed = WARN, False
+    else:
+        status, confirmed = FAIL, False
+    note = f" — {'; '.join(reasons)}, so likely an estimate" if reasons else ""
+    if status == WARN:
+        note += "; the date is recorded as unconfirmed"
     return _check(name, status,
                   f"{window} vs {their_day} ({off} day(s) apart, tolerance {tolerance_days}){note}",
                   ours=[d.isoformat() for d in ours], theirs=their_day.isoformat(),
-                  days_apart=off, tolerance_days=tolerance_days)
+                  days_apart=off, tolerance_days=tolerance_days, estimated=estimated,
+                  confirmed=confirmed)
 
 
 # ------------------------------------------------------------------- sources
@@ -196,22 +221,28 @@ class ValidateStage(Stage):
             ("last_close", close_check), ("market_cap", cap_check),
             ("next_earnings", earnings_check))]
 
-        status = PASS if all(c["status"] == PASS for c in checks) else FAIL
+        status = PASS if all(c["status"] in OK_STATUSES for c in checks) else FAIL
         ctx.write_json(VALIDATION_ARTIFACT, {
             "status": status, "ticker": ctx.ticker, "symbol": symbol,
             "run_date": ctx.run_date, "source": source_name,
-            "checked_at": datetime.now(timezone.utc).isoformat(), "checks": checks,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "warnings": [c["name"] for c in checks if c["status"] == WARN],
+            "checks": checks,
         })
         for c in checks:
             level = logging.INFO if c["status"] == PASS else logging.WARNING
             log.log(level, "check %-13s %-12s %s", c["name"], c["status"].upper(), c["detail"])
 
         if status != PASS:
-            bad = ", ".join(f"{c['name']}={c['status']}" for c in checks if c["status"] != PASS)
+            bad = ", ".join(f"{c['name']}={c['status']}" for c in checks
+                            if c["status"] not in OK_STATUSES)
             raise PipelineHalt(f"validation against {source_name} did not pass ({bad}). "
                                f"Details: {ctx.path(VALIDATION_ARTIFACT, '.json')}")
-        return StageResult(stage=self.name, status="ok",
-                           summary=f"{len(checks)} checks passed against {source_name}",
+        warned = [c["name"] for c in checks if c["status"] == WARN]
+        summary = f"{len(checks)} checks passed against {source_name}"
+        if warned:
+            summary += f" ({', '.join(warned)} with a warning — see validation.json)"
+        return StageResult(stage=self.name, status="ok", summary=summary,
                            artifacts=[VALIDATION_ARTIFACT])
 
 

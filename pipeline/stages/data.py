@@ -53,6 +53,9 @@ class DataStage(Stage):
 
         artifacts = ["data_ohlcv"]
         details: dict = {"provider": provider_name, "ohlcv_rows": len(ohlcv)}
+        session_report = getattr(provider, "session_report", None)
+        if session_report:
+            details["ohlcv_session"] = {"session": "regular", **session_report}
         if dropped:
             details["dropped_incomplete_bar"] = dropped.as_dict()
 

@@ -20,6 +20,7 @@ from pipeline.stages.validate import (
     FAIL,
     PASS,
     UNVERIFIABLE,
+    WARN,
     ValidateStage,
     check_close,
     check_earnings,
@@ -88,7 +89,7 @@ def test_market_cap_without_a_price_is_unverifiable():
     (["2026-11-18"], "2026-11-19", PASS),
     (["2026-11-18"], "2026-11-20", FAIL),
     (["2026-11-16", "2026-11-20"], "2026-11-19", PASS),     # inside an estimated window
-    (["2026-11-16", "2026-11-20"], "2026-11-22", FAIL),
+    (["2026-11-16", "2026-11-20"], "2026-11-24", WARN),     # our window is an estimate
 ])
 def test_earnings_date_tolerance(ours, theirs, status):
     assert check_earnings({"dates": ours}, {"date": theirs}, 1)["status"] == status
@@ -230,9 +231,30 @@ def test_earnings_for_another_symbol_or_without_a_date_is_refused():
         TradingViewData(_client_returning(undated)).next_earnings("NASDAQ:TEST")
 
 
-def test_weekend_earnings_date_is_flagged_as_an_estimate():
-    c = check_earnings({"dates": ["2026-07-29"]}, {"date": "2026-08-01"}, 1)   # a Saturday
-    assert c["status"] == FAIL and "Saturday" in c["detail"] and "estimate" in c["detail"]
+def test_weekend_date_disagreement_warns_and_is_unconfirmed():
+    # The live case: a firm weekday date vs a Saturday placeholder.
+    c = check_earnings({"dates": ["2026-07-29"]}, {"date": "2026-08-01"}, 1)
+    assert c["status"] == WARN and c["confirmed"] is False and c["estimated"] is True
+    assert "Saturday" in c["detail"] and "unconfirmed" in c["detail"]
+
+
+def test_two_firm_dates_that_disagree_still_fail():
+    c = check_earnings({"dates": ["2026-07-29"]}, {"date": "2026-08-05"}, 1)   # both Wednesdays
+    assert c["status"] == FAIL and c["confirmed"] is False
+
+
+def test_agreeing_firm_dates_are_confirmed():
+    c = check_earnings({"dates": ["2026-07-29"]}, {"date": "2026-07-29"}, 1)
+    assert c["status"] == PASS and c["confirmed"] is True
+
+
+def test_warning_does_not_halt_and_is_listed(ctx):
+    source = agreeing_source()
+    source.earnings = {"date": "2026-06-06"}                     # a Saturday; ours is 06-01
+    result = ValidateStage(lambda c: (source, "fake")).run(ctx)
+    assert "next_earnings with a warning" in result.summary
+    report = require_validation_pass(ctx)                        # the gate opens
+    assert report["status"] == PASS and report["warnings"] == ["next_earnings"]
 
 
 # ------------------------------------------------------ reference + config

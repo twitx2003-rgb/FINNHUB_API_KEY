@@ -9,8 +9,11 @@ def get_provider(name: str, settings=None) -> MarketDataProvider:
     key = (name or "").strip().lower()
     if key == "lse":
         from .lse import LSEProvider
-        api_key = settings.env("LSE_API_KEY") if settings else None
-        return LSEProvider(api_key=api_key)
+        if settings is None:
+            return LSEProvider()
+        return LSEProvider(api_key=settings.env("LSE_API_KEY"),
+                           daily_session=settings.data.daily_session,
+                           market_tz=settings.data.market_timezone)
     if key in ("yfinance_fred", "yfinance", "yf"):
         from .yf_fred import YFinanceFredProvider
         return YFinanceFredProvider()

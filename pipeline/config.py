@@ -33,6 +33,14 @@ class DataSettings:
     macro_max_age_monthly: int = 75
     macro_fallback: str | None = "fred"
     fetch_reference: bool = True
+    # "regular": daily bars are the 09:30-16:00 session, rebuilt from intraday
+    # candles. "extended": the vendor's own daily bar (LSE: 04:00-20:00).
+    daily_session: str = "regular"
+
+    def __post_init__(self):
+        if self.daily_session not in ("regular", "extended"):
+            raise ConfigError(f"data.daily_session must be 'regular' or 'extended', "
+                              f"got '{self.daily_session}'")
 
 
 @dataclass(frozen=True)

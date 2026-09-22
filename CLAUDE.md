@@ -236,7 +236,27 @@ writing code against it. Do not trust README summaries or memory.
     `pipeline/session_check.py`) and says which close/volume the daily bar matches.
     If confirmed, decide with the user: regular-session bars built from LSE intraday,
     or another OHLCV source. Until then `session_close: 16:15` may be too early for LSE.
-  - **Next:** once the scanner answers, map the two payloads -> Phase 2 done ->
+  - **CONFIRMED live (`--discover-session`, two days):** LSE's daily bar = the whole
+    04:00-20:00 New York day (close = last after-hours trade, volume = whole day,
+    ~2.4% above regular). The regular-session close rebuilt from LSE 5-minute bars
+    matched TradingView to about a cent on the day with the biggest gap.
+    **User decision: regular-session bars from LSE.** `data.daily_session: regular`
+    (default): `LSEProvider._regular_session_daily` fetches 30-minute candles in
+    120-day windows (overlap +-1 day, dedupe; a window at the 5000-row cap is an
+    error) and `session_check.regular_session_daily` aggregates 09:30-16:00, or
+    09:30-13:00 on rule-based half-days (`us_early_close`: day after Thanksgiving,
+    Jul 3 / Dec 24 Mon-Thu). Past days missing their first or last regular bar are
+    dropped and reported; the newest day is left to `drop_incomplete_session`.
+    `extended` keeps the vendor bar. Residual: the close is the last trade before 16:00,
+    not the official closing auction — a few cents at most seen so far.
+  - **Earnings: Yahoo gave a weekday date, TradingView a Saturday placeholder.** **User
+    decision: warn, don't halt, on estimates.** New status `warn` (passes the gate,
+    listed under `warnings` in validation.json): dates disagree AND either side is a
+    weekend date or a Yahoo window -> `confirmed: False`. Two firm dates that disagree
+    still fail. **Phase 5 must read `confirmed` and never state an unconfirmed date as
+    fact.**
+  - **Next:** user runs data,validate with regular-session bars -> if green, Phase 2
+    is done -> stop for review. Older note: once the scanner answers, map the two payloads -> Phase 2 done ->
     stop for review. Earlier line kept for history: `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),
     the validate stage (close / market cap / next earnings vs TradingView, tolerances from
