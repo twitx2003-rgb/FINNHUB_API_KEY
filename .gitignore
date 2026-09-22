@@ -1,0 +1,17 @@
+# secrets
+.env
+# virtualenvs
+.venv/
+.venv-docs/
+# pipeline outputs
+cache/
+logs/
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+# os
+.DS_Store
+Thumbs.db

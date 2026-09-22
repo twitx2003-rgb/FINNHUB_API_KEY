@@ -1,0 +1,145 @@
+"""Artifact schemas.
+
+Every Parquet file the pipeline writes is checked against a contract first, so a
+provider change surfaces here as a named error rather than three stages later as
+a confusing KeyError.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pandas as pd
+
+from .errors import ContractError
+
+NUMERIC = "numeric"
+DATETIME = "datetime"
+STRING = "string"
+ANY = "any"
+
+
+@dataclass(frozen=True)
+class Contract:
+    name: str
+    columns: dict[str, str]           # column -> NUMERIC | DATETIME | STRING | ANY
+    required_non_null: tuple[str, ...] = ()
+    allow_empty: bool = False
+
+    def validate(self, df: pd.DataFrame) -> pd.DataFrame:
+        if not isinstance(df, pd.DataFrame):
+            raise ContractError(f"{self.name}: expected a DataFrame, got {type(df).__name__}")
+
+        missing = [c for c in self.columns if c not in df.columns]
+        if missing:
+            raise ContractError(
+                f"{self.name}: missing column(s) {missing}. Present: {sorted(df.columns)}"
+            )
+
+        if df.empty and not self.allow_empty:
+            raise ContractError(f"{self.name}: no rows returned")
+
+        for column, kind in self.columns.items():
+            series = df[column]
+            if kind == NUMERIC and not pd.api.types.is_numeric_dtype(series):
+                raise ContractError(
+                    f"{self.name}.{column}: expected numeric, got dtype {series.dtype}"
+                )
+            if kind == DATETIME and not pd.api.types.is_datetime64_any_dtype(series):
+                raise ContractError(
+                    f"{self.name}.{column}: expected datetime, got dtype {series.dtype}"
+                )
+
+        for column in self.required_non_null:
+            if df[column].isna().any():
+                bad = int(df[column].isna().sum())
+                raise ContractError(f"{self.name}.{column}: {bad} null value(s), none allowed")
+
+        return df
+
+
+OHLCV = Contract(
+    name="data_ohlcv",
+    columns={
+        "timestamp": DATETIME,
+        "symbol": STRING,
+        "open": NUMERIC,
+        "high": NUMERIC,
+        "low": NUMERIC,
+        "close": NUMERIC,
+        "volume": NUMERIC,
+    },
+    required_non_null=("timestamp", "close"),
+)
+
+# Every provider's option chain is reindexed to exactly these columns, so the
+# artifact has one schema whichever vendor produced it. A vendor that lacks a
+# field (yfinance has no greeks, lse-data has no open interest) leaves it NaN.
+OPTIONS_COLUMNS: tuple[str, ...] = (
+    "underlying", "contract", "expiry", "dte", "strike", "type",
+    "last_price", "underlying_price", "implied_volatility",
+    "delta", "gamma", "theta", "vega", "rho",
+    "volume", "premium", "open_interest", "updated_at",
+)
+OPTIONS_NUMERIC: tuple[str, ...] = (
+    "dte", "strike", "last_price", "underlying_price", "implied_volatility",
+    "delta", "gamma", "theta", "vega", "rho", "volume", "premium", "open_interest",
+)
+
+def normalize_options(frame: pd.DataFrame) -> pd.DataFrame:
+    """Coerce a provider's chain to the canonical OPTIONS_COLUMNS schema."""
+    frame = frame.reindex(columns=list(OPTIONS_COLUMNS))
+    for column in OPTIONS_NUMERIC:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    for column in ("underlying", "contract", "expiry", "type", "updated_at"):
+        frame[column] = frame[column].astype("string")
+    frame["type"] = frame["type"].str.lower()
+    return frame
+
+
+OPTIONS_CHAIN = Contract(
+    name="data_options",
+    columns={
+        "underlying": STRING,
+        "expiry": ANY,
+        "strike": NUMERIC,
+        "type": STRING,
+        "implied_volatility": NUMERIC,
+        "delta": NUMERIC,
+        "gamma": NUMERIC,
+        "theta": NUMERIC,
+        "vega": NUMERIC,
+    },
+    # Chains legitimately come back empty outside market hours / for odd tickers.
+    allow_empty=True,
+)
+
+MACRO = Contract(
+    name="data_macro",
+    columns={"timestamp": DATETIME, "series": STRING, "value": NUMERIC},
+    required_non_null=("timestamp", "series"),
+    allow_empty=True,
+)
+
+
+def assert_ohlcv_sane(df: pd.DataFrame) -> pd.DataFrame:
+    """Bar-level invariants. Cheap here, and they catch provider bugs early.
+
+    The same rules are reused in phase 5 to validate generated Kronos candles.
+    """
+    if df.empty:
+        return df
+    body_high = df[["open", "close"]].max(axis=1)
+    body_low = df[["open", "close"]].min(axis=1)
+
+    problems = []
+    if (df["high"] < body_high - 1e-6).any():
+        problems.append("high < max(open, close)")
+    if (df["low"] > body_low + 1e-6).any():
+        problems.append("low > min(open, close)")
+    if (df["volume"] < 0).any():
+        problems.append("negative volume")
+    if (df[["open", "high", "low", "close"]] <= 0).any().any():
+        problems.append("non-positive price")
+    if problems:
+        raise ContractError(f"data_ohlcv: impossible bars -> {'; '.join(problems)}")
+    return df

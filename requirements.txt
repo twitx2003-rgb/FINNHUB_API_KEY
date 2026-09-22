@@ -1,0 +1,16 @@
+# Phase 1 — data stage. Python 3.12.
+# Pinned loosely; `pip freeze > requirements.lock.txt` once you are happy on Windows.
+
+lse-data>=0.14.0,<0.15      # MIT client; market data licence is separate — see LICENSES.md
+pandas>=2.2
+pyarrow>=16.0               # Parquet engine
+PyYAML>=6.0
+python-dotenv>=1.0
+tzdata>=2024.1               # IANA zones for zoneinfo; Windows has no system copy
+
+# Fallback provider (config: data.provider = "yfinance_fred")
+yfinance>=0.2.40
+pandas-datareader>=0.10.0   # FRED access for CPI / 10Y
+
+# Tests
+pytest>=8.0

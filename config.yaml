@@ -1,0 +1,60 @@
+# Personal capital-market research pipeline — configuration.
+# Secrets live in .env, never here.
+
+paths:
+  cache: cache
+  logs: logs
+
+data:
+  # "lse" (London Strategic Edge) or "yfinance_fred"
+  provider: lse
+  # Used only if the primary provider cannot be constructed (e.g. missing key).
+  # Set to null to make a missing primary a hard failure instead.
+  fallback_provider: yfinance_fred
+
+  ohlcv_timeframe: "1d"
+  ohlcv_lookback_days: 730
+
+  # The newest bar must be no older than this, or the stage fails.
+  # This is the guard against lse-data's order="asc" default silently handing
+  # back the START of history (US equities go back to 2003).
+  max_staleness_days: 5
+
+  # A bar fetched while the exchange is open is not a close — its volume covers
+  # part of the day. Drop today's bar until session_close (exchange local time,
+  # set a little after the official 16:00 so the closing auction has printed).
+  drop_incomplete_session: true
+  market_timezone: "America/New_York"
+  session_close: "16:15"
+
+  fetch_options: true
+  options_max_dte: 90
+
+  fetch_macro: true
+  # Series codes. Search with `python run.py --discover-macro cpi`.
+  # usacsa = US CPI, seasonally adjusted, index points — the same definition as
+  # FRED CPIAUCSL, which the yfinance_fred fallback uses, so the series means the
+  # same thing whichever provider runs. Alternatives: unitedstaconpriindcp (not
+  # seasonally adjusted), cpi_yoy (inflation rate, %).
+  cpi_series: "usacsa"
+  yield_series: "US10Y"
+
+  # Each macro series must be recent for its frequency, in calendar days. The
+  # monthly limit is generous because CPI for a month is published about two
+  # weeks after the month ends. A stale series is replaced by its FRED copy
+  # (CPIAUCSL / DGS10) when that copy is fresher; set macro_fallback: null to
+  # only warn instead.
+  macro_max_age_daily: 7
+  macro_max_age_monthly: 75
+  macro_fallback: fred
+
+validate:
+  # phase 2 — TradingView MCP (OAuth, paid plan) with Finnhub as a drop-in
+  provider: tradingview_mcp
+  close_tolerance_pct: 0.5
+  market_cap_tolerance_pct: 2.0
+  earnings_tolerance_days: 1
+
+# Stages that need their own interpreter (phase 4: PixelRAG needs an isolated
+# venv). Empty means "use the current interpreter".
+venvs: {}
