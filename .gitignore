@@ -15,3 +15,6 @@ __pycache__/
 # os
 .DS_Store
 Thumbs.db
+
+# Phase 4 inputs: your own PDFs and questions stay on your machine
+docs_input/

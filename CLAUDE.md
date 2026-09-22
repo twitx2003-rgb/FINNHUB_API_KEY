@@ -39,6 +39,8 @@ before the next one starts.
 .venv\Scripts\python.exe run.py --discover-session NVDA 2026-09-16  # is LSE's daily bar regular or extended hours
 .venv\Scripts\python.exe run.py --check-timesfm            # load TimesFM, forecast a known wave
 .venv\Scripts\python.exe run.py --seed-saved-answers NVDA   # bootstrap saved TradingView answers
+.venv\Scripts\python.exe run.py --check-docs-model          # load the page-embedding model, 2-page sanity check
+.venv\Scripts\python.exe run.py --docs-spike                # recall@5 on docs_input\*.pdf + questions.yaml
 ```
 
 Exit codes: 0 ok, 1 stage failed, 2 bad args, 3 validation HALT.
@@ -107,6 +109,27 @@ writing code against it. Do not trust README summaries or memory.
   the closing auction and some venues — unconfirmed. Stage 2 cross-checks every run
   against TradingView, which will settle the close question; which source feeds the
   phase 3 volume forecast is decided then (consider cross-checking volume in stage 2).
+- **Phase 4 (docs + extract): STARTED — spike harness built, waiting on the user's PDFs.**
+  Phase 3 approved by the user. Verified on PyPI (not the README): pixelrag 0.4.0
+  (Requires-Python >=3.12; the container's 3.11 pip reports "no versions" — not an
+  absence) and every native dep has a cp314/abi3 win_amd64 wheel (cef-capi-py,
+  pymupdf, faiss-cpu, torchvision, transformers 5.x, playwright, patchright, msgspec,
+  orjson, curl_cffi); scrapling 0.4.15 is pure Python (>=3.10).
+  Read from the pixelrag source: its PDF path is pdf2image/poppler (no Windows build);
+  its CPU embed path (`embed_cpu.embed_items`) never applies the English LoRA; model
+  `Qwen/Qwen3-VL-Embedding-2B`; page prompt = [image, "What is shown in this image?"];
+  query = [system "Retrieve images or text relevant to the user's query.", user text];
+  last-token pooling, L2 norm (serve API uses `model.model(...).last_hidden_state`).
+  So the spike (`pipeline/docs_spike.py`) implements that method directly: PyMuPDF
+  render (<= 875 px wide, 28-px aligned, cached by content hash), `QwenVLEmbedder`
+  (transformers, bf16 default on CPU), page vectors cached per (model, page),
+  recall@1/@5 + MRR against `docs_input/questions.yaml` ({question, file, pages}).
+  Commands: `--check-docs-model` (2 generated pages, known answers; prints s/page and
+  RAM) and `--docs-spike`. `docs_input/` is gitignored; example in
+  `examples/questions.example.yaml`. Decision rule unchanged (plan §2.3): good recall ->
+  keep; poor -> ColQwen2.5-multilingual. Not verified here: the real model (HF
+  blocked in this container); Qwen3-VL-Embedding-2B licence to confirm on its card.
+  Open: what Scrapling should extract (which sites/fields) — asked the user.
 - **TradingView scanner 429 is chronic** (hours at a time; blocked phase-3 runs twice).
   **User decision: keep last answers.** `validate.SavedAnswers` stores each successful
   market-cap / earnings answer per symbol in `cache/<TICKER>/tradingview_reference.json`;

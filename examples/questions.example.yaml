@@ -1,0 +1,10 @@
+# Copy to docs_input/questions.yaml and replace with questions about YOUR PDFs.
+# Each question needs the file name (exactly as in docs_input/) and the page
+# number(s), counting from 1, where the answer is. Write the questions the way
+# you would actually ask them — in Hebrew if that is how you search.
+- question: "מה דמי הניהול של הקרן?"
+  file: "תשקיף_קרן_לדוגמה.pdf"
+  pages: [3]
+- question: "מה הייתה ההכנסה ברבעון השלישי?"
+  file: "דוח_רבעוני_לדוגמה.pdf"
+  pages: [14, 15]

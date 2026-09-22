@@ -23,5 +23,13 @@ mcp>=2.2,<3
 # non-commercial only — see LICENSES.md. They download on first use.
 timesfm[torch]==3.0.2
 
+# Stage 4 — docs (phase 4 spike). Pages are rendered with PyMuPDF (PixelRAG's own
+# renderer needs poppler, which has no official Windows build) and embedded with
+# Qwen3-VL-Embedding through transformers — PixelRAG's method without its GPU
+# infrastructure. Checked: cp314 / abi3 win_amd64 wheels exist for all of these.
+pymupdf>=1.27
+pillow>=10.0
+transformers>=5.0,<6
+
 # Tests
 pytest>=8.0

@@ -59,6 +59,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="One-off: save the TradingView answers already in "
                              "logs/tradingview_payloads/ as the ticker's saved answers, dated by "
                              "when each file was written")
+    parser.add_argument("--docs-spike", action="store_true",
+                        help="Phase 4 spike: measure whether page-screenshot retrieval finds the "
+                             "right page in docs_input/*.pdf for the questions in "
+                             "docs_input/questions.yaml (recall@5)")
+    parser.add_argument("--docs-dtype", default="bfloat16", choices=["bfloat16", "float32"],
+                        help="Number format for the embedding model on CPU (bfloat16 needs "
+                             "about half the memory)")
+    parser.add_argument("--check-docs-model", action="store_true",
+                        help="Load the page-embedding model (downloads on first use), embed two "
+                             "generated pages and check a question finds the right one")
     parser.add_argument("--check-timesfm", action="store_true",
                         help="Load the TimesFM model (downloads the weights on first use) and "
                              "forecast a known test series, to prove the install works")
@@ -267,6 +277,81 @@ def tradingview_call(settings, spec: list[str]) -> int:
     return 0
 
 
+def docs_spike(settings, dtype: str) -> int:
+    """Run the phase-4 retrieval check and print recall with every question's top 5."""
+    from pipeline.docs_spike import QwenVLEmbedder, run_spike
+
+    input_dir = settings.root / "docs_input"
+    embedder = QwenVLEmbedder(dtype=dtype)
+    result = run_spike(input_dir, settings.cache_dir / "docs_spike", embedder)
+
+    print(f"\n== Phase 4 spike — {result.model}")
+    print(f"   {result.pages} pages, {result.seconds_per_page:.1f}s per page to embed "
+          "(0 = all cached)\n")
+    for row in result.rows:
+        mark = "HIT " if row["rank"] and row["rank"] <= 5 else "MISS"
+        print(f"  {mark} rank {row['rank'] or '-':>3}  {row['question']}")
+        print(f"        expected {row['expected']}")
+        for hit in row["top"]:
+            print(f"          {hit}")
+    print(f"\n  recall@1 {result.recall_at_1:.0%}   recall@5 {result.recall_at_5:.0%}   "
+          f"MRR {result.mrr:.2f}\n")
+    out = settings.log_dir / "docs_spike.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  Details saved to {out} (stays on this machine).\n")
+    return 0
+
+
+def check_docs_model(settings, dtype: str) -> int:
+    """Two generated pages with known content; a question must rank its page first."""
+    import tempfile
+    from pathlib import Path as _Path
+
+    import pymupdf
+
+    from pipeline.docs_spike import QwenVLEmbedder, render_pages
+
+    pages_text = [
+        "Quarterly report\nRevenue grew 20% to $30 billion.\nGross margin 72%.",
+        "Fund prospectus\nManagement fee: 0.25% per year.\nCustodian: Example Bank.",
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf = _Path(tmp) / "check.pdf"
+        doc = pymupdf.open()
+        for text in pages_text:
+            doc.new_page(width=595, height=842).insert_text((60, 120), text, fontsize=22)
+        doc.save(pdf)
+        images = render_pages(pdf, _Path(tmp) / "pages")
+
+        started = time.monotonic()
+        model = QwenVLEmbedder(dtype=dtype)
+        loaded = time.monotonic() - started
+        started = time.monotonic()
+        page_vecs = model.embed_pages(images)
+        per_page = (time.monotonic() - started) / len(images)
+        queries = ["What is the management fee?", "How much did revenue grow?"]
+        scores = model.embed_queries(queries) @ page_vecs.T
+
+    try:
+        import psutil
+        memory = f"{psutil.Process().memory_info().rss / 2**30:.1f} GB"
+    except ImportError:
+        memory = "n/a"
+    print(f"\n  model        {model.name}")
+    print(f"  load time    {loaded:.0f}s   embedding {per_page:.1f}s per page   memory {memory}")
+    ok = scores[0].argmax() == 1 and scores[1].argmax() == 0
+    for q, row in zip(queries, scores):
+        print(f"  {q:<30} page1 {row[0]:.3f}  page2 {row[1]:.3f}")
+    if not ok:
+        print("\n  The model loaded but matched the questions to the wrong pages. Send this output.\n")
+        return 1
+    print(f"\n  The model works. 20 PDFs of ~30 pages would take about "
+          f"{600 * per_page / 60:.0f} minutes to embed once (cached afterwards).")
+    print("  Next: put PDFs and questions.yaml in docs_input\\, then run --docs-spike\n")
+    return 0
+
+
 def seed_saved_answers(settings, ticker: str) -> int:
     """Turn earlier successful TradingView payloads into saved answers."""
     from datetime import datetime, timezone
@@ -410,6 +495,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return selftest(settings)
+
+    if args.check_docs_model:
+        try:
+            return check_docs_model(settings, args.docs_dtype)
+        except PipelineError as exc:
+            log.error("%s", exc)
+            return 1
+
+    if args.docs_spike:
+        try:
+            return docs_spike(settings, args.docs_dtype)
+        except PipelineError as exc:
+            log.error("%s", exc)
+            return 1
 
     if args.seed_saved_answers:
         return seed_saved_answers(settings, args.seed_saved_answers.strip().upper())
