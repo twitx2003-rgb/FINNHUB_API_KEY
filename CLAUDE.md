@@ -169,9 +169,21 @@ writing code against it. Do not trust README summaries or memory.
       (10-K/10-Q/transcripts — candidate input for phase 4), `get-news` (has `lang=he`).
     - The same server can create/delete alerts and edit watchlists. `call_tool` refuses
       anything that is not get/list/search/run-screener (`is_read_only`). Keep it that way.
-  - **Waiting on live output shapes from the user** (`--tradingview-call` for the three
-    tools above) — return formats are undocumented. Earlier line kept for history:
-    `--tradingview-tools` (tool names and schemas are unknown — public beta).
+  - **Live output shapes (first calls):**
+    - Failures are NOT flagged by MCP: `is_error` is False and the payload is
+      `{"success": false, "error": "..."}`. `tradingview_data.tool_payload` turns that
+      into `ToolFailed` / `RateLimited`; never read results without it.
+    - `get-ohlcv`: `{success, symbol, interval, count, notice, summary{...}, bars:[{t,o,h,l,c,v}]}`,
+      bars oldest first, `t` = unix seconds at the session open (13:30 UTC), newest bar can
+      be today's live session (the notice says so) -> `bars_frame` + `drop_incomplete_session`.
+    - `get-symbol-data` and `get-earnings-calendar` both returned
+      `tradingview api: https://scanner.tradingview.com/america/scan: 429` (rate limit behind
+      the MCP server). `TradingViewData.fetch` retries 429 only (5/15/45s); the raw
+      `--tradingview-call` retries too (10/30s). Their success shapes are still unknown.
+  - **Waiting on:** a successful `get-symbol-data` (market cap column) and
+    `get-earnings-calendar` result. If the scanner stays at 429, fall back to
+    `get-financials` for market cap and Yahoo-vs-? for earnings — decide with the user.
+    Earlier line kept for history: `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),
     the validate stage (close / market cap / next earnings vs TradingView, tolerances from
     `config.yaml`, write `validation.json`, raise `PipelineHalt` on any failed or

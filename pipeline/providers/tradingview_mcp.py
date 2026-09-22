@@ -346,6 +346,8 @@ def _run(coro):
 def _explain(exc: BaseException) -> ProviderError:
     from mcp.client.auth import OAuthRegistrationError
 
+    if isinstance(exc, PipelineError):   # already explained, e.g. a refused write tool
+        return exc if isinstance(exc, ProviderError) else ProviderError(str(exc))
     if isinstance(exc, OAuthRegistrationError):
         return ProviderError(
             "TradingView refused to register this program as an OAuth client "

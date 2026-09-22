@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 
 from pipeline.cache import make_run_context
 from pipeline.config import load_settings
@@ -179,9 +180,24 @@ def tradingview_tools(settings) -> int:
 def tradingview_call(settings, spec: list[str]) -> int:
     from pipeline.providers.tradingview_mcp import describe_result, parse_tool_args
 
+    from pipeline.providers.tradingview_data import RateLimited, tool_payload
+
     name, args = spec[0], parse_tool_args(spec[1:])
+    client = make_tradingview(settings)
     print(f"\ncalling {name}({args})\n")
-    print(describe_result(make_tradingview(settings).call_tool(name, args)))
+    for delay in (10, 30, None):
+        result = client.call_tool(name, args)
+        try:
+            tool_payload(result, name)
+        except RateLimited:
+            if delay is not None:
+                print(f"rate limited by TradingView (429) - retrying in {delay}s")
+                time.sleep(delay)
+                continue
+        except Exception:  # noqa: BLE001 — show the raw result whatever the failure
+            pass
+        break
+    print(describe_result(result))
     print()
     return 0
 
