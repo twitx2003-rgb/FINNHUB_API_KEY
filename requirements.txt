@@ -1,4 +1,5 @@
-# Phase 1 — data stage. Python 3.12.
+# Market research pipeline. Runs on Python 3.14 (Windows) — every pin below has been
+# checked for a matching wheel.
 # Pinned loosely; `pip freeze > requirements.lock.txt` once you are happy on Windows.
 
 lse-data>=0.14.0,<0.15      # MIT client; market data licence is separate — see LICENSES.md
@@ -15,6 +16,12 @@ pandas-datareader>=0.10.0   # FRED access for CPI / 10Y
 # Stage 2 — TradingView's official MCP server (streamable HTTP + OAuth 2.1).
 # 2.x is a new major line; the client code was written against 2.2.0's actual API.
 mcp>=2.2,<3
+
+# Stage 5 — forecast (phase 3: TimesFM on volume). Pulls PyTorch; on Windows the
+# PyPI wheel is the CPU build (checked: torch has a cp314 win_amd64 wheel, and
+# timesfm 3.0.2 is pure Python, Requires-Python >=3.10). The 3.0 WEIGHTS are
+# non-commercial only — see LICENSES.md. They download on first use.
+timesfm[torch]==3.0.2
 
 # Tests
 pytest>=8.0

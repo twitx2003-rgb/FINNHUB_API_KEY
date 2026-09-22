@@ -69,6 +69,54 @@ class ValidateSettings:
         return self.tradingview_symbols.get(ticker) or f"{self.tradingview_exchange}:{ticker}"
 
 
+# TimesFM is allowed only on series with trend and seasonality it can learn.
+# Prices are refused on purpose: the report must never present a single-stock
+# price path from a time-series model as a prediction (Kronos scenarios, phase
+# 5, are labelled as scenario ranges instead).
+FORECASTABLE = {"volume"}
+NEVER_FORECAST = {"open", "high", "low", "close", "price"}
+
+
+@dataclass(frozen=True)
+class ForecastSettings:
+    timesfm_enabled: bool = True
+    # "timesfm" = the real model; "synthetic" = an offline stand-in used by
+    # --selftest and the tests (never selected unless asked for).
+    timesfm_provider: str = "timesfm"
+    timesfm_checkpoint: str = "google/timesfm-3.0-pytorch"
+    timesfm_revision: str | None = None
+    timesfm_device: str = "cpu"
+    timesfm_batch_size: int = 16
+    timesfm_series: tuple[str, ...] = ("volume",)
+    horizon: int = 10
+    context_length: int = 512
+    interval: tuple[float, float] = (0.1, 0.9)
+    backtest_windows: int = 60
+    backtest_horizon: int = 5
+
+    def __post_init__(self):
+        object.__setattr__(self, "timesfm_series", tuple(self.timesfm_series))
+        object.__setattr__(self, "interval", tuple(float(q) for q in self.interval))
+        if self.timesfm_provider not in ("timesfm", "synthetic"):
+            raise ConfigError(f"forecast.timesfm_provider must be 'timesfm' or 'synthetic', "
+                              f"got '{self.timesfm_provider}'")
+        refused = set(self.timesfm_series) & NEVER_FORECAST
+        if refused:
+            raise ConfigError(f"forecast.timesfm_series: {sorted(refused)} refused — prices are "
+                              "never forecast with TimesFM (see LICENSES.md, 'forecast honesty')")
+        unknown = set(self.timesfm_series) - FORECASTABLE
+        if unknown:
+            raise ConfigError(f"forecast.timesfm_series: {sorted(unknown)} not supported; "
+                              f"allowed: {sorted(FORECASTABLE)}")
+        low, high = self.interval
+        if not 0 < low < 0.5 < high < 1:
+            raise ConfigError(f"forecast.interval must be (low, high) around 0.5, got {self.interval}")
+        for name in ("horizon", "context_length", "backtest_windows", "backtest_horizon",
+                     "timesfm_batch_size"):
+            if int(getattr(self, name)) < 1:
+                raise ConfigError(f"forecast.{name} must be >= 1")
+
+
 @dataclass(frozen=True)
 class Settings:
     root: Path
@@ -76,6 +124,7 @@ class Settings:
     log_dir: Path
     data: DataSettings
     validate: ValidateSettings
+    forecast: ForecastSettings = field(default_factory=ForecastSettings)
     venvs: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -109,11 +158,14 @@ def load_settings(config_path: Path | None = None, root: Path = ROOT) -> Setting
     paths = _section(raw, "paths")
     known_data = {f.name for f in DataSettings.__dataclass_fields__.values()}
     known_validate = {f.name for f in ValidateSettings.__dataclass_fields__.values()}
+    known_forecast = {f.name for f in ForecastSettings.__dataclass_fields__.values()}
 
     data_raw = _section(raw, "data")
     validate_raw = _section(raw, "validate")
+    forecast_raw = _section(raw, "forecast")
     # Typos in config are silent bugs otherwise — surface them immediately.
-    for name, given, known in (("data", data_raw, known_data), ("validate", validate_raw, known_validate)):
+    for name, given, known in (("data", data_raw, known_data), ("validate", validate_raw, known_validate),
+                               ("forecast", forecast_raw, known_forecast)):
         unknown = set(given) - known
         if unknown:
             raise ConfigError(f"config.yaml: unknown key(s) under '{name}': {sorted(unknown)}")
@@ -124,6 +176,7 @@ def load_settings(config_path: Path | None = None, root: Path = ROOT) -> Setting
         log_dir=root / paths.get("logs", "logs"),
         data=DataSettings(**data_raw),
         validate=ValidateSettings(**validate_raw),
+        forecast=ForecastSettings(**forecast_raw),
         venvs=_section(raw, "venvs"),
         raw=raw,
     )

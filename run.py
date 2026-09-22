@@ -54,6 +54,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tradingview-token-status", action="store_true",
                         help="Show whether a TradingView sign-in is stored, when it expires and "
                              "whether it can be renewed (prints no secrets)")
+    parser.add_argument("--check-timesfm", action="store_true",
+                        help="Load the TimesFM model (downloads the weights on first use) and "
+                             "forecast a known test series, to prove the install works")
     parser.add_argument("--selftest", action="store_true",
                         help="Run the pipeline against synthetic data (no API key, no network) "
                              "to verify the installation, then exit")
@@ -259,6 +262,44 @@ def tradingview_call(settings, spec: list[str]) -> int:
     return 0
 
 
+def check_timesfm(settings) -> int:
+    """Load the real model and forecast a series with a known answer."""
+    import numpy as np
+
+    from pipeline.forecasting import TimesFMForecaster, check_forecast, quantile_index
+
+    f = settings.forecast
+    print(f"\nLoading {f.timesfm_checkpoint} on {f.timesfm_device}. The first run downloads "
+          "the weights (large); later runs load them from the local cache.\n")
+    started = time.monotonic()
+    model = TimesFMForecaster(f.timesfm_checkpoint, revision=f.timesfm_revision,
+                              device=f.timesfm_device, batch_size=f.timesfm_batch_size)
+    loaded = time.monotonic() - started
+
+    # Weekly-period wave around 100: a model that works continues it.
+    t = np.arange(260, dtype=float)
+    series = 100 + 10 * np.sin(2 * np.pi * t / 5)
+    started = time.monotonic()
+    q = model.forecast([series], 10)[0]
+    took = time.monotonic() - started
+    check_forecast(q, float(series[-20:].mean()), nonnegative=True, context="check")
+    median = q[:, quantile_index(model.quantiles, 0.5)]
+    truth = 100 + 10 * np.sin(2 * np.pi * np.arange(260, 270) / 5)
+    error = float(np.mean(np.abs(median - truth)))
+
+    print(f"  model        {model.name}")
+    print(f"  quantiles    {model.quantiles}")
+    print(f"  load time    {loaded:.1f}s   forecast time {took:.1f}s")
+    print(f"  expected     {' '.join(f'{v:6.1f}' for v in truth)}")
+    print(f"  forecast     {' '.join(f'{v:6.1f}' for v in median)}")
+    print(f"  mean error   {error:.2f} (the wave's amplitude is 10)\n")
+    if error > 3:
+        print("  The model loaded but did not follow a simple wave. Send this output.\n")
+        return 1
+    print("  TimesFM works. Next: python run.py --ticker NVDA --stages data,validate,forecast\n")
+    return 0
+
+
 def selftest(settings) -> int:
     """Prove the install works without a key or a network connection.
 
@@ -271,10 +312,11 @@ def selftest(settings) -> int:
     from pipeline.cache import make_run_context
     from pipeline.gate import require_validation_pass
     from pipeline.stages.data import DataStage, print_close_preview
+    from pipeline.stages.forecast import ForecastStage
     from pipeline.stages.validate import ValidateStage
 
-    print("\nSelf-test: running the data and validate stages against synthetic data "
-          "(no API key, no network).\n")
+    print("\nSelf-test: running the data, validate and forecast stages against synthetic "
+          "data (no API key, no network, no model download).\n")
 
     with tempfile.TemporaryDirectory() as tmp:
         scratch = replace_cache_dir(settings, _Path(tmp))
@@ -293,11 +335,18 @@ def selftest(settings) -> int:
         ValidateStage().run(ctx)
         for check in require_validation_pass(ctx)["checks"]:
             print(f"  ok  validate: {check['name']:<14} {check['status']}")
+        forecast = ForecastStage()
+        forecast._gate(ctx)                       # the real gate, as in a run
+        result = forecast.run(ctx)
+        print(f"  ok  forecast: {len(ctx.read_parquet('forecast_timesfm'))} rows "
+              f"({result.details['forecast']['model']} stand-in — it repeats the last value, so "
+              "'did not beat the naive forecast' above is expected here)")
         print_close_preview(ctx, rows=3)
 
     print("Self-test passed. The install is sound — pandas, pyarrow, Parquet IO,\n"
-          "contracts, the ordering/freshness guards, the validation gate and the\n"
-          "stage runner all work.\n"
+          "contracts, the ordering/freshness guards, the validation gate, the forecast\n"
+          "checks and the stage runner all work. To check the TimesFM model itself:\n"
+          "  python run.py --check-timesfm\n"
           "Add LSE_API_KEY to .env, then run:  python run.py --ticker NVDA --stages data\n")
     return 0
 
@@ -312,6 +361,7 @@ def replace_cache_dir(settings, cache_dir):
         data=dataclasses.replace(settings.data, provider="synthetic", fallback_provider=None,
                                  macro_fallback=None),
         validate=dataclasses.replace(settings.validate, provider="synthetic"),
+        forecast=dataclasses.replace(settings.forecast, timesfm_provider="synthetic"),
     )
 
 
@@ -324,6 +374,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return selftest(settings)
+
+    if args.check_timesfm:
+        try:
+            return check_timesfm(settings)
+        except PipelineError as exc:
+            log.error("%s", exc)
+            return 1
 
     if args.discover_session:
         try:

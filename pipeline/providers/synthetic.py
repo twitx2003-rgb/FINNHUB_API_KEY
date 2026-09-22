@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import pandas as pd
 
 from .base import MarketDataProvider
@@ -16,7 +17,7 @@ from .base import MarketDataProvider
 class SyntheticProvider(MarketDataProvider):
     name = "synthetic"
 
-    def __init__(self, bars: int = 30):
+    def __init__(self, bars: int = 120):   # enough history for the forecast backtest
         self.bars = bars
 
     def daily_ohlcv(self, symbol: str, lookback_days: int) -> pd.DataFrame:
@@ -25,6 +26,8 @@ class SyntheticProvider(MarketDataProvider):
         end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         days = pd.date_range(end=end - timedelta(days=1), periods=self.bars, freq="D", tz="UTC")
         base = pd.Series(range(self.bars), dtype="float64") + 100.0
+        # A weekly-ish wave, so volume forecasts and backtests have something to do.
+        volume = 1_000_000.0 * (1 + 0.2 * np.sin(np.arange(self.bars) / 1.6))
         return pd.DataFrame({
             "timestamp": days,
             "symbol": symbol,
@@ -32,7 +35,7 @@ class SyntheticProvider(MarketDataProvider):
             "high": base + 2.0,
             "low": base - 2.0,
             "close": base + 1.0,
-            "volume": 1_000_000.0,
+            "volume": volume,
         })
 
     def options_chain(self, underlying: str, max_dte: int) -> pd.DataFrame:

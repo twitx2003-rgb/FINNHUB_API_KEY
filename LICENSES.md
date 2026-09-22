@@ -16,7 +16,8 @@ Verified 2026-09-22 against PyPI/repository metadata.
 | **Finnhub** (optional validator) | n/a (hosted) | **Free tier is non-commercial** | 60 API calls/minute. Monetising or redistributing the data requires a paid plan. |
 | **Scrapling** 0.4.15 | BSD-3-Clause | n/a | You remain responsible for the target site's ToS and robots.txt. Scraping a site does not grant rights to its content. |
 | **PixelRAG** 0.4.0 | Apache-2.0 | Model weights are third-party — see below | Requires Python ≥3.12. |
-| **TimesFM** 3.0.2 | Apache-2.0 (code) | **`timesfm-non-commercial-license-v1.0`** for 3.0 weights | "Non-commercial, non-production" only. Fine for this project. TimesFM ≤2.5 weights are Apache-2.0 if you ever need commercial use. |
+| **TimesFM** 3.0.2 | Apache-2.0 (code) | **`timesfm-non-commercial-license-v1.0`** for 3.0 weights (`google/timesfm-3.0-pytorch`, per the package README) | "Non-commercial, non-production" only. Fine for this project. TimesFM ≤2.5 weights are Apache-2.0 if you ever need commercial use (`forecast.timesfm_checkpoint`). |
+| **PyTorch** | BSD-3-Clause | n/a | Pulled in by `timesfm[torch]`; CPU build on Windows. |
 | **Kronos** | MIT | Weights on Hugging Face (`NeoQuasar/Kronos-*`) | Authors state the reference pipeline is "a simplified example and not a production-ready quantitative trading system". |
 | **TradingAgents** 0.3.1 | Apache-2.0 | n/a | Research framework. Not investment advice. |
 | **Anthropic API** | n/a | Anthropic Commercial Terms | Billed per token. Costs money on every debate run. |

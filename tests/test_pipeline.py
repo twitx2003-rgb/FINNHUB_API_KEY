@@ -96,7 +96,7 @@ def test_data_stage_writes_all_artifacts(ctx, monkeypatch, capsys):
     assert ohlcv["timestamp"].is_monotonic_increasing
 
     manifest = ctx.load_manifest()
-    assert manifest["artifacts"]["data_ohlcv"]["rows"] == 30
+    assert manifest["artifacts"]["data_ohlcv"]["rows"] == 120
 
     print_close_preview(ctx)
     assert "LATEST CLOSE" in capsys.readouterr().out

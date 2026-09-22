@@ -88,6 +88,26 @@ validate:
   # Every check must pass. A check that cannot run (rate limit, sign-in needed,
   # missing reference value) counts as "unverifiable" and halts the run too.
 
+forecast:
+  # Phase 3: TimesFM forecasts volume with a quantile band, and backtests itself
+  # on the same history so the band's reliability is reported next to it.
+  # Prices are refused here on purpose (see LICENSES.md, "Not financial advice").
+  timesfm_enabled: true
+  timesfm_provider: timesfm          # "synthetic" only for --selftest
+  # 3.0 weights are NON-COMMERCIAL. Downloaded once to the Hugging Face cache.
+  timesfm_checkpoint: "google/timesfm-3.0-pytorch"
+  # Pin a Hugging Face commit here once you are happy, so the model cannot change
+  # under you between runs. null = latest.
+  timesfm_revision: null
+  timesfm_device: cpu
+  timesfm_batch_size: 16
+  timesfm_series: [volume]
+  horizon: 10                        # trading sessions ahead
+  context_length: 512                # sessions of history the model sees
+  interval: [0.1, 0.9]               # the band: 10th to 90th percentile (an 80% band)
+  backtest_windows: 60               # rolling origins, most recent history
+  backtest_horizon: 5                # sessions ahead in each backtest window
+
 # Stages that need their own interpreter (phase 4: PixelRAG needs an isolated
 # venv). Empty means "use the current interpreter".
 venvs: {}

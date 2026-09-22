@@ -105,7 +105,30 @@ writing code against it. Do not trust README summaries or memory.
   the closing auction and some venues — unconfirmed. Stage 2 cross-checks every run
   against TradingView, which will settle the close question; which source feeds the
   phase 3 volume forecast is decided then (consider cross-checking volume in stage 2).
-- **Phase 2 (validate): DONE, awaiting the user's review** (2026-09-22). First fully
+- **Phase 3 (forecast, TimesFM): BUILT, waiting on the first live run.** Phase 2 was
+  approved by the user. API read from the timesfm 3.0.2 wheel source, not the README:
+  `from timesfm3 import TimesFM3Forecaster`; `.from_pretrained("google/timesfm-3.0-pytorch",
+  device=, revision=, per_core_batch_size=)`; `.config.quantiles` = 0.1..0.9;
+  `.predict_batch(contexts, horizon, return_quantiles=True, make_positive=True)` yields
+  `ForecastOutput.quantiles` of shape (horizon, 9). Max context 15360.
+  - `pipeline/forecasting.py`: `TimesFMForecaster` (lazy import; tests never need torch),
+    `SyntheticForecaster` (last value ± band; selftest only), `check_forecast` (finite,
+    ordered, non-negative, median within 10x of the recent level), `forecast_series`,
+    `backtest` (rolling origins in ONE batch; MAPE of the median, naive "last value" MAPE,
+    skill, band coverage vs target, per-step MAPE; never sees the future — tested).
+  - `pipeline/stages/forecast.py`: gated; volume only (`ForecastSettings` refuses price
+    columns); writes `forecast_timesfm.parquet` (contract `FORECAST`: series, step, date,
+    q_low, median, q_high, model) and `forecast_timesfm.json` (backtest + caveats).
+    Forecast dates come from `session_check.next_sessions` over a rule-based NYSE holiday
+    calendar (`us_market_holidays`: incl. Good Friday, Juneteenth, observed-day moves;
+    no unscheduled closures). Kronos joins this stage in phase 5.
+  - `run.py --check-timesfm` loads the real model and forecasts a known wave (install
+    check). `--selftest` now runs data -> validate -> forecast with stand-ins.
+  - Synthetic provider now 120 bars with a volume wave (backtest needs >= 69 points).
+  - requirements: `timesfm[torch]==3.0.2` (torch cp314 win_amd64 wheel exists on PyPI).
+  - Not verified here: the real model's output on live data — HF is blocked in this
+    container, so the first real forecast happens on the user's machine.
+- **Phase 2 (validate): DONE and approved by the user** (2026-09-22). First fully
   green live `data,validate` run: all 10 overlapping closes within 0.1% of TradingView
   once daily bars were rebuilt from the regular session (before: up to ~0.8%);
   market cap passed; earnings `warn` (TradingView's date is a Saturday placeholder).

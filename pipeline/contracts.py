@@ -121,6 +121,14 @@ MACRO = Contract(
 )
 
 
+FORECAST = Contract(
+    name="forecast_timesfm",
+    columns={"series": STRING, "step": NUMERIC, "date": DATETIME, "q_low": NUMERIC,
+             "median": NUMERIC, "q_high": NUMERIC, "model": STRING},
+    required_non_null=("series", "step", "date", "q_low", "median", "q_high"),
+)
+
+
 def assert_ohlcv_sane(df: pd.DataFrame) -> pd.DataFrame:
     """Bar-level invariants. Cheap here, and they catch provider bugs early.
 
