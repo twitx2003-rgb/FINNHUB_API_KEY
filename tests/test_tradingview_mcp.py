@@ -55,7 +55,8 @@ class FakeAuthServer:
 
     TOKEN = "access-token-1"
 
-    def __init__(self):
+    def __init__(self, dcr: bool = True):
+        self.dcr = dcr                       # False: behave like TradingView (no registration)
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.registrations: list[dict] = []
@@ -76,17 +77,19 @@ class FakeAuthServer:
         if path.startswith("/.well-known/oauth-protected-resource"):
             resp = JSONResponse({"resource": f"{base}/mcp", "authorization_servers": [base]})
         elif path.startswith("/.well-known/oauth-authorization-server"):
-            resp = JSONResponse({
+            meta = {
                 "issuer": base,
                 "authorization_endpoint": f"{base}/authorize",
                 "token_endpoint": f"{base}/token",
-                "registration_endpoint": f"{base}/register",
                 "response_types_supported": ["code"],
                 "grant_types_supported": ["authorization_code", "refresh_token"],
                 "code_challenge_methods_supported": ["S256"],
                 "token_endpoint_auth_methods_supported": ["none"],
-            })
-        elif path == "/register":
+            }
+            if self.dcr:
+                meta["registration_endpoint"] = f"{base}/register"
+            resp = JSONResponse(meta)
+        elif path == "/register" and self.dcr:
             body = await request.json()
             self.registrations.append(body)
             resp = JSONResponse({**body, "client_id": "client-123"}, status_code=201)
@@ -237,3 +240,27 @@ def test_parse_tool_args_handles_json_and_strings():
         "symbol": "NASDAQ:NVDA", "limit": 5, "adjusted": True}
     with pytest.raises(ValueError):
         parse_tool_args(["oops"])
+
+
+# ----------------------------------------------------------------- diagnostics
+def test_diagnose_reports_the_sign_in_routes(auth_server):
+    from pipeline.providers.tradingview_mcp import diagnose
+
+    text = "\n".join(diagnose(f"{auth_server.base}/mcp"))
+    assert "authorization_servers" in text
+    assert f"dynamic client registration : yes -> {auth_server.base}/register" in text
+    assert "client ID metadata document : NO" in text
+
+
+def test_server_without_registration_gets_an_actionable_error(tmp_path):
+    """What the first live sign-in hit: TradingView answered /register with 404."""
+    from pipeline.providers.tradingview_mcp import diagnose
+
+    server = FakeAuthServer(dcr=False)
+    server.start()
+    try:
+        assert "dynamic client registration : NO" in "\n".join(diagnose(f"{server.base}/mcp"))
+        with pytest.raises(ProviderError, match="--tradingview-diagnose"):
+            _client(server, tmp_path, interactive=True).list_tools()
+    finally:
+        server.stop()

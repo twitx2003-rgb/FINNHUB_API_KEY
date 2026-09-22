@@ -25,12 +25,13 @@ before the next one starts.
 
 ```
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m pytest -q                     # 68 offline tests
+.venv\Scripts\python.exe -m pytest -q                     # 70 offline tests
 .venv\Scripts\python.exe run.py --selftest                # install check, no key/network
 .venv\Scripts\python.exe run.py --ticker NVDA --stages data
 .venv\Scripts\python.exe run.py --ticker NVDA --stages all
 .venv\Scripts\python.exe run.py --discover-macro cpi      # search LSE macro catalogue
 .venv\Scripts\python.exe run.py --discover-fundamentals NVDA   # raw market-cap / earnings fields
+.venv\Scripts\python.exe run.py --tradingview-diagnose  # which OAuth routes the server offers
 .venv\Scripts\python.exe run.py --auth-tradingview      # one-time browser sign-in
 .venv\Scripts\python.exe run.py --tradingview-tools     # list TradingView MCP tools
 .venv\Scripts\python.exe run.py --tradingview-call TOOL key=value ...   # raw tool result
@@ -112,6 +113,12 @@ writing code against it. Do not trust README summaries or memory.
   - **LSE has no earnings dates at all** (no mention anywhere in the client). The primary
     next-earnings date comes from Yahoo (`Ticker.calendar["Earnings Date"]`, a list — two
     dates mean an unconfirmed window). Market cap comes from LSE `fundamentals()`.
+  - **First live sign-in failed:** `OAuthRegistrationError: Registration failed: 404`.
+    TradingView's AS metadata evidently has no `registration_endpoint`, so the SDK fell back
+    to guessing `/register`. The mcp SDK also supports a Client ID Metadata Document
+    (`OAuthClientProvider(client_metadata_url=...)`), used only when the AS advertises
+    `client_id_metadata_document_supported`. `run.py --tradingview-diagnose` prints what the
+    server advertises; the next step depends on it.
   - **Waiting on live discovery from the user:** `--auth-tradingview`,
     `--tradingview-tools` (tool names and schemas are unknown — public beta), and
     `--discover-fundamentals NVDA` (LSE market-cap field name and unit).

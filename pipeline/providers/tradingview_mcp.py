@@ -257,12 +257,25 @@ def _run(coro):
     except AuthorizationRequired:
         raise
     except BaseExceptionGroup as group:  # anyio task groups wrap the real error
-        auth = [e for e in _flatten(group) if isinstance(e, AuthorizationRequired)]
+        leaves = _flatten(group)
+        auth = [e for e in leaves if isinstance(e, AuthorizationRequired)]
         if auth:
             raise auth[0] from None
-        raise ProviderError(f"TradingView MCP: {_first_message(group)}") from group
+        raise _explain(leaves[0] if leaves else group) from group
     except Exception as exc:  # noqa: BLE001 — surface transport/auth failures uniformly
-        raise ProviderError(f"TradingView MCP: {type(exc).__name__}: {exc}") from exc
+        raise _explain(exc) from exc
+
+
+def _explain(exc: BaseException) -> ProviderError:
+    from mcp.client.auth import OAuthRegistrationError
+
+    if isinstance(exc, OAuthRegistrationError):
+        return ProviderError(
+            "TradingView refused to register this program as an OAuth client "
+            f"({exc}). Its server may not allow dynamic registration. Run "
+            "`python run.py --tradingview-diagnose` to see which sign-in routes it offers."
+        )
+    return ProviderError(f"TradingView MCP: {type(exc).__name__}: {exc}")
 
 
 def _flatten(group: BaseException) -> list[BaseException]:
@@ -278,6 +291,79 @@ def _first_message(group: BaseException) -> str:
     leaves = _flatten(group)
     first = leaves[0] if leaves else group
     return f"{type(first).__name__}: {first}"
+
+
+# ------------------------------------------------------------------ diagnostics
+def _fetch_json(url: str, timeout: float = 20) -> tuple[int | None, Any]:
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"Accept": "application/json",
+                                               "User-Agent": "market-research-pipeline"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, None
+    except (OSError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _metadata_urls(issuer: str) -> list[str]:
+    """RFC 8414 / OIDC discovery locations, in the order the SDK tries them."""
+    parsed = urlparse(issuer)
+    root = f"{parsed.scheme}://{parsed.netloc}"
+    path = parsed.path.rstrip("/")
+    if path:
+        return [f"{root}/.well-known/oauth-authorization-server{path}",
+                f"{root}/.well-known/openid-configuration{path}",
+                f"{root}{path}/.well-known/openid-configuration"]
+    return [f"{root}/.well-known/oauth-authorization-server",
+            f"{root}/.well-known/openid-configuration"]
+
+
+def diagnose(url: str = DEFAULT_URL) -> list[str]:
+    """What the server advertises about sign-in, and which client-identification
+    route it allows: dynamic registration, a client ID metadata document, or neither."""
+    out: list[str] = []
+    parsed = urlparse(url)
+    root = f"{parsed.scheme}://{parsed.netloc}"
+    candidates = [f"{root}/.well-known/oauth-protected-resource{parsed.path.rstrip('/')}",
+                  f"{root}/.well-known/oauth-protected-resource"]
+
+    resource = None
+    for candidate in candidates:
+        status, body = _fetch_json(candidate)
+        out.append(f"GET {candidate} -> {status}")
+        if isinstance(body, dict):
+            resource = body
+            out.append(json.dumps(body, indent=2))
+            break
+    if resource is None:
+        out.append("No protected-resource metadata found.")
+        return out
+
+    for issuer in resource.get("authorization_servers") or []:
+        meta = None
+        for candidate in _metadata_urls(issuer):
+            status, body = _fetch_json(candidate)
+            out.append(f"GET {candidate} -> {status}")
+            if isinstance(body, dict):
+                meta = body
+                out.append(json.dumps(body, indent=2))
+                break
+        if meta is None:
+            out.append(f"No authorization-server metadata found for {issuer}.")
+            continue
+        out.append("")
+        out.append(f"summary for {issuer}:")
+        out.append(f"  dynamic client registration : "
+                   f"{'yes -> ' + meta['registration_endpoint'] if meta.get('registration_endpoint') else 'NO'}")
+        out.append(f"  client ID metadata document : "
+                   f"{'yes' if meta.get('client_id_metadata_document_supported') else 'NO'}")
+        out.append(f"  PKCE methods                : {meta.get('code_challenge_methods_supported')}")
+        out.append(f"  scopes                      : {meta.get('scopes_supported')}")
+    return out
 
 
 # ---------------------------------------------------------------- presentation

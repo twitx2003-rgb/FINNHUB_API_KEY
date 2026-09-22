@@ -37,6 +37,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                              "return for SYMBOL (phase 2 mapping), then exit")
     parser.add_argument("--auth-tradingview", action="store_true",
                         help="Sign in to TradingView's MCP server in the browser (once), then exit")
+    parser.add_argument("--tradingview-diagnose", action="store_true",
+                        help="Show which OAuth sign-in routes TradingView's server offers, then exit")
     parser.add_argument("--tradingview-tools", action="store_true",
                         help="List the tools TradingView's MCP server offers, then exit")
     parser.add_argument("--tradingview-call", nargs="+", metavar=("TOOL", "KEY=VALUE"),
@@ -138,6 +140,15 @@ def auth_tradingview(settings) -> int:
     return 0
 
 
+def tradingview_diagnose(settings) -> int:
+    from pipeline.providers.tradingview_mcp import diagnose
+
+    print()
+    print("\n".join(diagnose(settings.validate.tradingview_url)))
+    print()
+    return 0
+
+
 def tradingview_tools(settings) -> int:
     import json
 
@@ -226,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
 
     tradingview_commands = (
         (args.auth_tradingview, lambda: auth_tradingview(settings)),
+        (args.tradingview_diagnose, lambda: tradingview_diagnose(settings)),
         (args.tradingview_tools, lambda: tradingview_tools(settings)),
         (args.tradingview_call, lambda: tradingview_call(settings, args.tradingview_call)),
     )
