@@ -35,6 +35,7 @@ before the next one starts.
 .venv\Scripts\python.exe run.py --auth-tradingview      # one-time browser sign-in
 .venv\Scripts\python.exe run.py --tradingview-tools     # list TradingView MCP tools
 .venv\Scripts\python.exe run.py --tradingview-call TOOL key=value ...   # raw tool result
+.venv\Scripts\python.exe run.py --tradingview-token-status  # stored sign-in: expiry, refresh token (no secrets)
 ```
 
 Exit codes: 0 ok, 1 stage failed, 2 bad args, 3 validation HALT.
@@ -199,6 +200,17 @@ writing code against it. Do not trust README summaries or memory.
       validate output tells the user to send that file. Map it then; do not guess.
     - `validate.provider: synthetic` (`SyntheticSource`) is used by `--selftest`, which
       now runs data + validate and opens the gate.
+  - **First live `data,validate` run: all three checks unverifiable — 401, then the SDK
+    asked for a browser sign-in.** Cause (SDK gap, mcp 2.2): `_initialize` loads stored
+    tokens but not their expiry, so an expired access token counts as valid, is sent,
+    gets 401, and the SDK goes to full re-authorization without trying the refresh
+    token. Fix: `FileTokenStorage` records `tokens_saved_at` (legacy files: file mtime)
+    and `_StoredExpiryAuth._initialize` restores `token_expiry_time`, so the SDK
+    refreshes first. Tests reproduce it against a fake server whose old tokens stop
+    working (they fail with the plain provider). Headless sign-in errors now say why
+    (no refresh token / refresh refused / rejected) and the SDK's traceback for that
+    case is filtered. `run.py --tradingview-token-status` shows the stored state, no
+    secrets. Unknown yet: whether TradingView issues refresh tokens at all.
   - **Next:** once the scanner answers, map the two payloads -> Phase 2 done ->
     stop for review. Earlier line kept for history: `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),

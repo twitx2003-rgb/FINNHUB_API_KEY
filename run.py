@@ -48,6 +48,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tradingview-call", nargs="+", metavar=("TOOL", "KEY=VALUE"),
                         help="Call one TradingView tool and print the raw result, e.g. "
                              "--tradingview-call mcp-tv-get-ohlcv symbol=NASDAQ:NVDA count=5")
+    parser.add_argument("--tradingview-token-status", action="store_true",
+                        help="Show whether a TradingView sign-in is stored, when it expires and "
+                             "whether it can be renewed (prints no secrets)")
     parser.add_argument("--selftest", action="store_true",
                         help="Run the pipeline against synthetic data (no API key, no network) "
                              "to verify the installation, then exit")
@@ -133,6 +136,15 @@ def make_tradingview(settings, interactive: bool = False):
         callback_port=v.tradingview_callback_port,
         interactive=interactive,
     )
+
+
+def tradingview_token_status(settings) -> int:
+    status = make_tradingview(settings).storage.status()
+    print()
+    for key, value in status.items():
+        print(f"  {key:<14} {value}")
+    print()
+    return 0
 
 
 def auth_tradingview(settings) -> int:
@@ -277,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         (args.tradingview_probe, lambda: tradingview_probe(settings, args.tradingview_probe)),
         (args.tradingview_tools, lambda: tradingview_tools(settings)),
         (args.tradingview_call, lambda: tradingview_call(settings, args.tradingview_call)),
+        (args.tradingview_token_status, lambda: tradingview_token_status(settings)),
     )
     for requested, command in tradingview_commands:
         if requested:

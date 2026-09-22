@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import threading
 import time
@@ -64,6 +65,8 @@ class FakeAuthServer:
         self.base = f"http://127.0.0.1:{self.port}"
         self.registrations: list[dict] = []
         self.token_requests: list[dict] = []
+        self.valid_token = self.TOKEN          # the only access token /mcp accepts
+        self.refresh_ok = True
         self._mcp_app = _fake_tradingview_mcp().streamable_http_app()
         self._server = None
 
@@ -122,11 +125,18 @@ class FakeAuthServer:
         elif path == "/token":
             form = dict(await request.form())
             self.token_requests.append(form)
-            resp = JSONResponse({"access_token": self.TOKEN, "token_type": "Bearer",
+            if form.get("grant_type") == "refresh_token":
+                if not self.refresh_ok or form.get("refresh_token") != "refresh-1":
+                    resp = JSONResponse({"error": "invalid_grant"}, status_code=400)
+                    return await resp(scope, receive, send)
+                self.valid_token = f"access-token-{len(self.token_requests)}"
+            else:
+                self.valid_token = self.TOKEN
+            resp = JSONResponse({"access_token": self.valid_token, "token_type": "Bearer",
                                  "expires_in": 3600, "refresh_token": "refresh-1"})
         elif path.startswith("/mcp"):
             auth = dict(scope["headers"]).get(b"authorization", b"").decode()
-            if auth != f"Bearer {self.TOKEN}":
+            if auth != f"Bearer {self.valid_token}":
                 resp = Response(status_code=401, headers={
                     "WWW-Authenticate":
                         f'Bearer resource_metadata="{base}/.well-known/oauth-protected-resource"'})
@@ -439,3 +449,55 @@ def test_cloudfront_error_page_is_a_block_whatever_the_status():
     assert _cdn_verdict(403, {"x-amz-cf-id": "x"}, page)[0] is True
     origin = b'{"error": "invalid_client"}'
     assert _cdn_verdict(400, {"x-amz-cf-id": "x", "X-Cache": "Miss from cloudfront"}, origin)[0] is False
+
+
+# ------------------------------------------------------------- token expiry
+def _sign_in(server, tmp_path):
+    _client(server, tmp_path, interactive=True).list_tools()
+    return FileTokenStorage(tmp_path / "tv_tokens.json")
+
+
+def _expire(storage, server):
+    """What an hour passing does: the server stops accepting the old access token."""
+    data = json.loads(storage.path.read_text())
+    data["tokens_saved_at"] = time.time() - 7200
+    storage.path.write_text(json.dumps(data))
+    server.valid_token = "only-a-refreshed-token-works-now"
+
+
+def test_expired_token_is_refreshed_not_sent_to_a_browser(auth_server, tmp_path):
+    storage = _sign_in(auth_server, tmp_path)
+    assert storage.status()["expired"] is False and storage.status()["refresh_token"]
+    _expire(storage, auth_server)
+    assert storage.status()["expired"] is True
+
+    headless = _client(auth_server, tmp_path, interactive=False)
+    assert "get_quote" in describe_tools(headless.list_tools())
+    assert auth_server.token_requests[-1]["grant_type"] == "refresh_token"
+    assert storage.status()["expired"] is False            # new expiry recorded
+
+
+def test_token_file_from_before_expiry_tracking_uses_its_age(auth_server, tmp_path):
+    storage = _sign_in(auth_server, tmp_path)
+    data = json.loads(storage.path.read_text())
+    del data["tokens_saved_at"]
+    storage.path.write_text(json.dumps(data))
+    old = time.time() - 7200
+    os.utime(storage.path, (old, old))
+    auth_server.valid_token = "only-a-refreshed-token-works-now"
+
+    _client(auth_server, tmp_path, interactive=False).list_tools()
+    assert auth_server.token_requests[-1]["grant_type"] == "refresh_token"
+
+
+def test_refused_refresh_explains_why_a_sign_in_is_needed(auth_server, tmp_path):
+    storage = _sign_in(auth_server, tmp_path)
+    _expire(storage, auth_server)
+    auth_server.refresh_ok = False
+    with pytest.raises(AuthorizationRequired, match="expired at .* refreshing it failed"):
+        _client(auth_server, tmp_path, interactive=False).list_tools()
+
+
+def test_token_status_never_contains_secrets(auth_server, tmp_path):
+    status = json.dumps(_sign_in(auth_server, tmp_path).status())
+    assert "access-token" not in status and "refresh-1" not in status

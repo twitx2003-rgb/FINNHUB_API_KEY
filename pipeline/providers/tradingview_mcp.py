@@ -25,12 +25,14 @@ the live server (`run.py --tradingview-tools`) rather than assumed here.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 import os
 import re
 import socket
 import threading
+import time
 import webbrowser
 from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -59,6 +61,19 @@ class AuthorizationRequired(PipelineError):
     """Stored TradingView tokens are missing or no longer accepted."""
 
 
+class _HideExpectedSignInError(logging.Filter):
+    """The SDK logs every aborted OAuth flow as an ERROR with a traceback. A
+    headless run stopping to ask for a sign-in is expected, and is reported once,
+    in plain words, by the caller."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        return not isinstance(exc, AuthorizationRequired)
+
+
+logging.getLogger("mcp.client.auth.oauth2").addFilter(_HideExpectedSignInError())
+
+
 # --------------------------------------------------------------------------- tokens
 class FileTokenStorage:
     """Persists OAuth tokens and the registered client between runs.
@@ -79,7 +94,7 @@ class FileTokenStorage:
             log.warning("token file %s is unreadable; a new sign-in will be needed", self.path)
             return {}
 
-    def _write(self, key: str, value: dict) -> None:
+    def _write(self, key: str, value: Any) -> None:
         data = self._read()
         data[key] = value
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +120,42 @@ class FileTokenStorage:
 
     async def set_tokens(self, tokens) -> None:
         self._write("tokens", tokens.model_dump(mode="json", exclude_none=True))
+        self._write("tokens_saved_at", time.time())
+
+    def expires_at(self) -> float | None:
+        """When the stored access token expires (unix time), or None if unknown.
+
+        The SDK forgets this between runs: it loads tokens without their expiry,
+        treats an expired token as valid, gets a 401 and asks for a full browser
+        sign-in instead of using the refresh token. `_StoredExpiryAuth` feeds this
+        value back in so the refresh happens.
+        """
+        data = self._read()
+        expires_in = (data.get("tokens") or {}).get("expires_in")
+        if expires_in is None:
+            return None
+        saved_at = data.get("tokens_saved_at")
+        if saved_at is None:           # files written before this was recorded
+            try:
+                saved_at = self.path.stat().st_mtime
+            except OSError:
+                return None
+        return float(saved_at) + float(expires_in)
+
+    def status(self) -> dict:
+        """What is stored, without any secret: for messages and diagnostics."""
+        tokens = self._read().get("tokens") or {}
+        expires = self.expires_at()
+        return {
+            "file": str(self.path),
+            "access_token": bool(tokens.get("access_token")),
+            "refresh_token": bool(tokens.get("refresh_token")),
+            "scope": tokens.get("scope"),
+            "expires_in": tokens.get("expires_in"),
+            "expires_at": (datetime.fromtimestamp(expires, timezone.utc).isoformat(timespec="seconds")
+                           if expires is not None else None),
+            "expired": None if expires is None else time.time() > expires,
+        }
 
     async def get_client_info(self):
         from mcp.shared.auth import OAuthClientInformationFull
@@ -224,7 +275,9 @@ class TradingViewMCP:
     async def _on_redirect(self, auth_url: str) -> None:
         if not self.interactive:
             raise AuthorizationRequired(
-                "TradingView needs you to sign in. Run once: python run.py --auth-tradingview"
+                f"TradingView needs you to sign in ({_why_sign_in(self.storage.status())}). "
+                "Sign in on tradingview.com in your browser, then run once: "
+                "python run.py --auth-tradingview"
             )
         # TradingView's CDN blocks /accounts/signin/ when it arrives as a redirect from
         # this authorize URL, so the sign-in must already exist in the browser.
@@ -260,11 +313,10 @@ class TradingViewMCP:
                 yield client
             return
 
-        from mcp.client.auth import OAuthClientProvider
         from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
         from mcp.shared.auth import OAuthClientMetadata
 
-        auth = OAuthClientProvider(
+        auth = _stored_expiry_auth()(
             server_url=self.url,
             client_metadata=OAuthClientMetadata(
                 client_name="market-research-pipeline (personal use)",
@@ -320,6 +372,37 @@ class TradingViewMCP:
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         return _run(self.call_tool_async(name, arguments))
+
+
+def _why_sign_in(status: dict) -> str:
+    if not status["access_token"]:
+        return "no stored sign-in"
+    if not status["refresh_token"]:
+        return "the stored token has no refresh token, so it cannot be renewed"
+    if status["expired"]:
+        return f"the access token expired at {status['expires_at']} and refreshing it failed"
+    return "TradingView rejected the stored token"
+
+
+def _stored_expiry_auth():
+    """OAuthClientProvider that restores the stored token's expiry on load.
+
+    Without this, a run after the access token expired sends the stale token,
+    gets 401, and the SDK goes straight to a browser sign-in — the refresh token
+    is never tried. With the expiry known, the SDK refreshes first.
+    """
+    from mcp.client.auth import OAuthClientProvider
+
+    class _StoredExpiryAuth(OAuthClientProvider):
+        async def _initialize(self) -> None:
+            await super()._initialize()
+            expires_at = getattr(self.context.storage, "expires_at", None)
+            if self.context.current_tokens is not None and expires_at is not None:
+                when = expires_at()
+                if when is not None:
+                    self.context.token_expiry_time = when
+
+    return _StoredExpiryAuth
 
 
 async def _identify_request(request) -> None:
