@@ -40,6 +40,10 @@ class ValidateSettings:
     close_tolerance_pct: float = 0.5
     market_cap_tolerance_pct: float = 2.0
     earnings_tolerance_days: int = 1
+    tradingview_url: str = "https://mcp.tradingview.com/mcp"
+    tradingview_token_path: str = "~/.mrp/tv_tokens.json"
+    tradingview_callback_host: str = "127.0.0.1"
+    tradingview_callback_port: int = 8765
 
 
 @dataclass(frozen=True)

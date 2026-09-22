@@ -25,11 +25,15 @@ before the next one starts.
 
 ```
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m pytest -q                     # 59 offline tests
+.venv\Scripts\python.exe -m pytest -q                     # 68 offline tests
 .venv\Scripts\python.exe run.py --selftest                # install check, no key/network
 .venv\Scripts\python.exe run.py --ticker NVDA --stages data
 .venv\Scripts\python.exe run.py --ticker NVDA --stages all
 .venv\Scripts\python.exe run.py --discover-macro cpi      # search LSE macro catalogue
+.venv\Scripts\python.exe run.py --discover-fundamentals NVDA   # raw market-cap / earnings fields
+.venv\Scripts\python.exe run.py --auth-tradingview      # one-time browser sign-in
+.venv\Scripts\python.exe run.py --tradingview-tools     # list TradingView MCP tools
+.venv\Scripts\python.exe run.py --tradingview-call TOOL key=value ...   # raw tool result
 ```
 
 Exit codes: 0 ok, 1 stage failed, 2 bad args, 3 validation HALT.
@@ -98,7 +102,23 @@ writing code against it. Do not trust README summaries or memory.
   the closing auction and some venues — unconfirmed. Stage 2 cross-checks every run
   against TradingView, which will settle the close question; which source feeds the
   phase 3 volume forecast is decided then (consider cross-checking volume in stage 2).
-- **Next: phase 2.** The user has a TradingView plan (Essential or higher).
+- **Phase 2 (validate): IN PROGRESS.** The user has a TradingView plan (Essential+).
+  - Built: `pipeline/providers/tradingview_mcp.py` — OAuth 2.1 client written against the
+    introspected mcp 2.2.0 API, tokens in `~/.mrp/tv_tokens.json` (outside the repo),
+    one-shot loopback callback on 127.0.0.1:8765, and headless runs that raise
+    `AuthorizationRequired` instead of waiting for a browser. Tested end to end against a
+    local OAuth-protected MCP server (`tests/test_tradingview_mcp.py`): dynamic client
+    registration, PKCE, token storage, headless reuse.
+  - **LSE has no earnings dates at all** (no mention anywhere in the client). The primary
+    next-earnings date comes from Yahoo (`Ticker.calendar["Earnings Date"]`, a list — two
+    dates mean an unconfirmed window). Market cap comes from LSE `fundamentals()`.
+  - **Waiting on live discovery from the user:** `--auth-tradingview`,
+    `--tradingview-tools` (tool names and schemas are unknown — public beta), and
+    `--discover-fundamentals NVDA` (LSE market-cap field name and unit).
+  - Then build: market cap + earnings dates into the data stage (`data_reference.json`),
+    the validate stage (close / market cap / next earnings vs TradingView, tolerances from
+    `config.yaml`, write `validation.json`, raise `PipelineHalt` on any failed or
+    unverifiable check).
 
 ## Roadmap (one phase at a time, stop for review after each)
 

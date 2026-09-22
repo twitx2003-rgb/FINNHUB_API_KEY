@@ -258,6 +258,10 @@ class LSEProvider(MarketDataProvider):
         return frame.sort_values("timestamp").reset_index(drop=True)
 
     # -------------------------------------------------------------- discovery
+    def fundamentals_rows(self, symbol: str) -> list[dict[str, Any]]:
+        """Raw fundamentals snapshot (market cap, PE, margins...) — shape not yet mapped."""
+        return self._call("fundamentals", symbol=symbol)
+
     def list_economics(self) -> list[dict[str, Any]]:
         """Catalogue of macro series — used by `run.py --discover-macro`."""
         return self._call("economics")

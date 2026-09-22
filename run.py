@@ -32,6 +32,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--discover-macro", nargs="?", const="", default=None, metavar="TERM",
                         help="Search the LSE macro catalogue (e.g. --discover-macro cpi), "
                              "then exit. Without TERM, lists the first entries.")
+    parser.add_argument("--discover-fundamentals", metavar="SYMBOL",
+                        help="Show the raw market-cap and earnings-date fields the providers "
+                             "return for SYMBOL (phase 2 mapping), then exit")
+    parser.add_argument("--auth-tradingview", action="store_true",
+                        help="Sign in to TradingView's MCP server in the browser (once), then exit")
+    parser.add_argument("--tradingview-tools", action="store_true",
+                        help="List the tools TradingView's MCP server offers, then exit")
+    parser.add_argument("--tradingview-call", nargs="+", metavar=("TOOL", "KEY=VALUE"),
+                        help="Call one TradingView tool and print the raw result, e.g. "
+                             "--tradingview-call get_quote symbol=NASDAQ:NVDA")
     parser.add_argument("--selftest", action="store_true",
                         help="Run the pipeline against synthetic data (no API key, no network) "
                              "to verify the installation, then exit")
@@ -74,6 +84,82 @@ def discover_macro(settings, term: str = "") -> int:
         print("\nBond-yield tenors are a separate table; the default US10Y is a valid code.")
     print("\nPut the codes you want in config.yaml -> data.cpi_series / data.yield_series")
     print("Try: --discover-macro cpi   --discover-macro inflation   --discover-macro usa\n")
+    return 0
+
+
+def discover_fundamentals(settings, symbol: str) -> int:
+    """Print what LSE and Yahoo return for market cap / earnings dates.
+
+    Stage 2 compares these against TradingView, but neither shape has been seen
+    live yet — so look before mapping, as with the option chain.
+    """
+    from pipeline.providers import get_provider
+
+    print(f"\n== LSE fundamentals({symbol}) ==")
+    try:
+        rows = get_provider("lse", settings).fundamentals_rows(symbol)
+        print(f"{len(rows)} row(s)")
+        for key, value in sorted((rows[0] if rows else {}).items()):
+            print(f"  {key:<32} {str(value)[:70]}")
+    except Exception as exc:  # noqa: BLE001 — discovery reports whatever happened
+        print(f"  failed: {type(exc).__name__}: {exc}")
+
+    print(f"\n== Yahoo calendar({symbol}) — LSE has no earnings dates ==")
+    try:
+        import yfinance as yf
+
+        for key, value in (yf.Ticker(symbol).calendar or {}).items():
+            print(f"  {key:<32} {value!r}"[:110])
+    except Exception as exc:  # noqa: BLE001
+        print(f"  failed: {type(exc).__name__}: {exc}")
+    print()
+    return 0
+
+
+def make_tradingview(settings, interactive: bool = False):
+    from pipeline.providers.tradingview_mcp import TradingViewMCP
+
+    v = settings.validate
+    return TradingViewMCP(
+        url=v.tradingview_url,
+        token_path=v.tradingview_token_path,
+        callback_host=v.tradingview_callback_host,
+        callback_port=v.tradingview_callback_port,
+        interactive=interactive,
+    )
+
+
+def auth_tradingview(settings) -> int:
+    client = make_tradingview(settings, interactive=True)
+    tools = client.list_tools()
+    print(f"\nSigned in. TradingView's MCP server offers {len(tools)} tools.")
+    print(f"Tokens stored in {client.storage.path} (outside the project; never commit it).")
+    print("Next: python run.py --tradingview-tools\n")
+    return 0
+
+
+def tradingview_tools(settings) -> int:
+    import json
+
+    from pipeline.providers.tradingview_mcp import describe_tools
+
+    tools = make_tradingview(settings).list_tools()
+    print(f"\n{len(tools)} tools:\n")
+    print(describe_tools(tools))
+    target = settings.log_dir / "tradingview_tools.json"
+    target.write_text(json.dumps([t.model_dump(mode="json") for t in tools], indent=2,
+                                 ensure_ascii=False), encoding="utf-8")
+    print(f"\nFull schemas saved to {target}\n")
+    return 0
+
+
+def tradingview_call(settings, spec: list[str]) -> int:
+    from pipeline.providers.tradingview_mcp import describe_result, parse_tool_args
+
+    name, args = spec[0], parse_tool_args(spec[1:])
+    print(f"\ncalling {name}({args})\n")
+    print(describe_result(make_tradingview(settings).call_tool(name, args)))
+    print()
     return 0
 
 
@@ -134,6 +220,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return selftest(settings)
+
+    if args.discover_fundamentals:
+        return discover_fundamentals(settings, args.discover_fundamentals.strip().upper())
+
+    tradingview_commands = (
+        (args.auth_tradingview, lambda: auth_tradingview(settings)),
+        (args.tradingview_tools, lambda: tradingview_tools(settings)),
+        (args.tradingview_call, lambda: tradingview_call(settings, args.tradingview_call)),
+    )
+    for requested, command in tradingview_commands:
+        if requested:
+            try:
+                return command()
+            except PipelineError as exc:
+                log.error("%s", exc)
+                return 1
 
     if args.discover_macro is not None:
         return discover_macro(settings, args.discover_macro)

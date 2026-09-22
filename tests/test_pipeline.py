@@ -169,3 +169,39 @@ def test_discover_macro_searches_every_field(monkeypatch, capsys):
     assert "1 of 3 macro series matching" in out
     assert "catalogue fields:" in out
     assert "last_value=324.1" in out and "last_tick=2026-08-01" in out
+
+
+def test_discover_fundamentals_prints_both_sources(monkeypatch, capsys):
+    import run
+
+    class FakeLSE:
+        def fundamentals_rows(self, symbol):
+            return [{"symbol": symbol, "market_cap": 1.0e12, "pe_ratio": 30.0}]
+
+    class FakeTicker:
+        def __init__(self, symbol):
+            self.calendar = {"Earnings Date": ["2026-11-18"]}
+
+    monkeypatch.setattr("pipeline.providers.get_provider", lambda name, settings=None: FakeLSE())
+    monkeypatch.setattr("yfinance.Ticker", FakeTicker)
+    assert run.discover_fundamentals(settings=None, symbol="NVDA") == 0
+    out = capsys.readouterr().out
+    assert "market_cap" in out and "1000000000000.0" in out
+    assert "Earnings Date" in out and "2026-11-18" in out
+
+
+def test_discover_fundamentals_reports_failures_instead_of_crashing(monkeypatch, capsys):
+    import run
+
+    def broken(name, settings=None):
+        raise RuntimeError("no key")
+
+    class BrokenTicker:
+        def __init__(self, symbol):
+            raise ConnectionError("offline")
+
+    monkeypatch.setattr("pipeline.providers.get_provider", broken)
+    monkeypatch.setattr("yfinance.Ticker", BrokenTicker)
+    assert run.discover_fundamentals(settings=None, symbol="NVDA") == 0
+    out = capsys.readouterr().out
+    assert "failed: RuntimeError: no key" in out and "failed: ConnectionError: offline" in out

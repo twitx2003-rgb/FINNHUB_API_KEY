@@ -49,11 +49,21 @@ data:
   macro_fallback: fred
 
 validate:
-  # phase 2 — TradingView MCP (OAuth, paid plan) with Finnhub as a drop-in
+  # Second source for the cross-check: TradingView's official MCP server
+  # (OAuth 2.1, needs a paid TradingView plan). Sign in once with:
+  #   python run.py --auth-tradingview
   provider: tradingview_mcp
   close_tolerance_pct: 0.5
   market_cap_tolerance_pct: 2.0
   earnings_tolerance_days: 1
+
+  tradingview_url: "https://mcp.tradingview.com/mcp"
+  # Holds a refresh token — kept in your user folder, outside the project.
+  tradingview_token_path: "~/.mrp/tv_tokens.json"
+  # Where the browser is sent back after sign-in. The port must stay fixed:
+  # it is registered with TradingView on the first sign-in.
+  tradingview_callback_host: "127.0.0.1"
+  tradingview_callback_port: 8765
 
 # Stages that need their own interpreter (phase 4: PixelRAG needs an isolated
 # venv). Empty means "use the current interpreter".

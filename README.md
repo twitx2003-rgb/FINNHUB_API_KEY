@@ -16,8 +16,8 @@ output, so any stage can be rerun on its own.
 
 | Phase | Stage(s) | State |
 |---|---|---|
-| 1 | `data` | **done** — this phase |
-| 2 | `validate` | next |
+| 1 | `data` | **done** — accepted against live data |
+| 2 | `validate` | **in progress** — TradingView connection built, mapping pending |
 | 3 | `forecast` (TimesFM) | planned |
 | 4 | `docs`, `extract` | planned |
 | 5 | `forecast` (Kronos), `debate`, `report` | planned |
@@ -43,7 +43,7 @@ pip install -r requirements.txt
 Now verify the install before you have any credentials:
 
 ```bat
-python -m pytest -q          :: 59 offline tests
+python -m pytest -q          :: 68 offline tests
 python run.py --selftest     :: runs the real data stage against synthetic data
 ```
 
@@ -74,6 +74,8 @@ python run.py --ticker NVDA --stages all        :: full sequence
 python run.py --ticker NVDA --stages data,validate
 python run.py --discover-macro cpi              :: search macro series codes for config.yaml
 python run.py --selftest                        :: verify the install, no key or network
+python run.py --auth-tradingview                :: one-time TradingView sign-in (browser)
+python run.py --tradingview-tools               :: list TradingView MCP tools
 python -m pytest -q                             :: offline tests, no network
 ```
 

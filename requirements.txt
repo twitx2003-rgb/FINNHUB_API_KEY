@@ -12,5 +12,9 @@ tzdata>=2024.1               # IANA zones for zoneinfo; Windows has no system co
 yfinance>=0.2.40
 pandas-datareader>=0.10.0   # FRED access for CPI / 10Y
 
+# Stage 2 — TradingView's official MCP server (streamable HTTP + OAuth 2.1).
+# 2.x is a new major line; the client code was written against 2.2.0's actual API.
+mcp>=2.2,<3
+
 # Tests
 pytest>=8.0

@@ -12,6 +12,7 @@ Verified 2026-09-22 against PyPI/repository metadata.
 |---|---|---|---|
 | **lse-data** 0.14.0 | MIT | **Separate and stricter** — see below | Free key. Streaming and vault downloads share one allowance; check `GET /vault/usage`. `limit` is clamped to 5000 rows per call. |
 | **TradingView MCP** | n/a (hosted service) | TradingView Terms of Service | **Requires a paid plan (Essential or higher).** Public beta — tool names and schemas may change. OAuth 2.1, no API key. |
+| **mcp** (Python SDK) 2.2 | MIT | n/a | Client library only; TradingView's terms govern the data it returns. |
 | **Finnhub** (optional validator) | n/a (hosted) | **Free tier is non-commercial** | 60 API calls/minute. Monetising or redistributing the data requires a paid plan. |
 | **Scrapling** 0.4.15 | BSD-3-Clause | n/a | You remain responsible for the target site's ToS and robots.txt. Scraping a site does not grant rights to its content. |
 | **PixelRAG** 0.4.0 | Apache-2.0 | Model weights are third-party — see below | Requires Python ≥3.12. |
