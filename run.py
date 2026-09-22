@@ -39,6 +39,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Sign in to TradingView's MCP server in the browser (once), then exit")
     parser.add_argument("--tradingview-diagnose", action="store_true",
                         help="Show which OAuth sign-in routes TradingView's server offers, then exit")
+    parser.add_argument("--tradingview-probe", metavar="URL",
+                        help="Follow a TradingView sign-in URL hop by hop and report where it "
+                             "is blocked, then exit")
     parser.add_argument("--tradingview-tools", action="store_true",
                         help="List the tools TradingView's MCP server offers, then exit")
     parser.add_argument("--tradingview-call", nargs="+", metavar=("TOOL", "KEY=VALUE"),
@@ -149,6 +152,15 @@ def tradingview_diagnose(settings) -> int:
     return 0
 
 
+def tradingview_probe(settings, url: str) -> int:
+    from pipeline.providers.tradingview_mcp import probe_url
+
+    print()
+    print("\n".join(probe_url(url)))
+    print()
+    return 0
+
+
 def tradingview_tools(settings) -> int:
     import json
 
@@ -238,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
     tradingview_commands = (
         (args.auth_tradingview, lambda: auth_tradingview(settings)),
         (args.tradingview_diagnose, lambda: tradingview_diagnose(settings)),
+        (args.tradingview_probe, lambda: tradingview_probe(settings, args.tradingview_probe)),
         (args.tradingview_tools, lambda: tradingview_tools(settings)),
         (args.tradingview_call, lambda: tradingview_call(settings, args.tradingview_call)),
     )

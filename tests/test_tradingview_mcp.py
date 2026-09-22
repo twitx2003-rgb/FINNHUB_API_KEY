@@ -369,3 +369,19 @@ def test_localhost_callback_answers_on_ipv4_and_ipv6(address):
         assert result.code == "c1" and result.state == "s1"
     finally:
         cb.stop()
+
+
+# ---------------------------------------------------------------------- probe
+def test_probe_follows_hops_and_names_the_blocked_one():
+    from pipeline.providers.tradingview_mcp import probe_url
+
+    server = FakeAuthServer(waf=True)
+    server.start()
+    try:
+        ok = "\n".join(probe_url(f"{server.base}/authorize?redirect_uri=http://localhost:8765/callback&state=s"))
+        assert "hop 0:" in ok and "-> 302" in ok and "redirects to the local callback" in ok
+
+        blocked = "\n".join(probe_url(f"{server.base}/authorize?redirect_uri=http://127.0.0.1:8765/callback"))
+        assert "-> 403 BLOCKED by CDN" in blocked
+    finally:
+        server.stop()

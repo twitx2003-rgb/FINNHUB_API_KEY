@@ -452,6 +452,56 @@ def _probe_authorize(authorization_endpoint: str, resource: str, port: int = 876
     return lines
 
 
+def probe_url(url: str, max_hops: int = 8) -> list[str]:
+    """Follow a sign-in URL hop by hop, as this program (not a browser) would, and
+    report each hop's status, whether the CDN blocked it, and where it redirects.
+
+    The browser got a CloudFront block on the authorize page while a scripted
+    request with a placeholder client passed; following the real URL shows
+    whether the block sits on the authorize request itself or a later hop.
+    Cookies are not sent and nothing sensitive is printed.
+    """
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urljoin
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    lines = []
+    for hop in range(max_hops):
+        shown = urlparse(url)
+        label = f"{shown.scheme}://{shown.netloc}{shown.path}"
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+        try:
+            with opener.open(req, timeout=20) as resp:
+                status, headers, body = resp.status, resp.headers, resp.read(4000)
+        except urllib.error.HTTPError as exc:
+            status, headers, body = exc.code, exc.headers, (exc.read() or b"")[:4000]
+        except OSError as exc:
+            lines.append(f"hop {hop}: {label} -> {type(exc).__name__}: {exc}")
+            break
+        blocked = status == 403 and (b"cloudfront" in body.lower()
+                                     or "x-amz-cf-id" in {k.lower() for k in headers.keys()})
+        location = headers.get("Location")
+        note = "BLOCKED by CDN" if blocked else ""
+        lines.append(f"hop {hop}: {label} -> {status} {note}".rstrip())
+        if location and 300 <= status < 400:
+            nxt = urlparse(urljoin(url, location))
+            if nxt.hostname in ("localhost", "127.0.0.1", "::1"):
+                lines.append(f"        redirects to the local callback ({nxt.scheme}://{nxt.netloc}{nxt.path})")
+                break
+            url = urljoin(url, location)
+            continue
+        text = " ".join(body.decode("utf-8", "replace").split())
+        title = text[text.lower().find("<title>") + 7:text.lower().find("</title>")] if "<title>" in text.lower() else ""
+        lines.append(f"        page: {(title or text)[:140]}")
+        break
+    return lines
+
+
 def diagnose(url: str = DEFAULT_URL) -> list[str]:
     """What the server advertises about sign-in, and which client-identification
     route it allows: dynamic registration, a client ID metadata document, or neither."""

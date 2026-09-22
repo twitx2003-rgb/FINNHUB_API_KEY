@@ -25,7 +25,7 @@ before the next one starts.
 
 ```
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m pytest -q                     # 77 offline tests (1 skips without IPv6)
+.venv\Scripts\python.exe -m pytest -q                     # 78 offline tests (1 skips without IPv6)
 .venv\Scripts\python.exe run.py --selftest                # install check, no key/network
 .venv\Scripts\python.exe run.py --ticker NVDA --stages data
 .venv\Scripts\python.exe run.py --ticker NVDA --stages all
@@ -130,6 +130,14 @@ writing code against it. Do not trust README summaries or memory.
     to IPv6 first). A stored client registered with a different redirect is dropped so the
     SDK re-registers. `--tradingview-diagnose` probes the authorize endpoint with both
     redirect hosts and reports which one the CDN blocks — confirm the cause there.
+  - **Third live sign-in: the localhost hypothesis was wrong.** Registration with the
+    localhost redirect succeeded (201), and scripted authorize requests with either
+    redirect host passed the CDN (400 from the app, placeholder client_id) — yet the
+    user's browser still got the CloudFront 403 on the real authorize URL. So the block is
+    browser-side (cookies/extensions/headers) or on a later hop, not the redirect host.
+    `run.py --tradingview-probe URL` follows the real URL hop by hop without cookies and
+    names the hop the CDN blocks. Next evidence: that output, an InPrivate-window attempt,
+    and whether the block appears before or after signing in/approving.
   - **Live provider shapes (from `--discover-fundamentals NVDA`):**
     - LSE `fundamentals()`: keys `beta country currency current_price description
       dividend_yield exchange industry ipo_date logo_url market_cap name pe_ratio
