@@ -105,7 +105,17 @@ writing code against it. Do not trust README summaries or memory.
   the closing auction and some venues — unconfirmed. Stage 2 cross-checks every run
   against TradingView, which will settle the close question; which source feeds the
   phase 3 volume forecast is decided then (consider cross-checking volume in stage 2).
-- **Phase 2 (validate): IN PROGRESS.** The user has a TradingView plan (Essential+).
+- **Phase 2 (validate): DONE, awaiting the user's review** (2026-09-22). First fully
+  green live `data,validate` run: all 10 overlapping closes within 0.1% of TradingView
+  once daily bars were rebuilt from the regular session (before: up to ~0.8%);
+  market cap passed; earnings `warn` (TradingView's date is a Saturday placeholder).
+  501 regular-session days vs 506 vendor daily bars over the same window: the 5
+  vendor-only days had no regular-session bars at all — not yet looked into (likely
+  market holidays with stray off-hours prints). One day kept with an interior gap.
+  Phase 3 prep: `timesfm==3.0.2` is pure Python (Requires-Python >=3.10) and PyPI has a
+  `torch` cp314 win_amd64 wheel (CPU), so the user's Python 3.14 works — no reinstall.
+  History of how Phase 2 got here:
+- **Phase 2 (validate) — history.** The user has a TradingView plan (Essential+).
   - Built: `pipeline/providers/tradingview_mcp.py` — OAuth 2.1 client written against the
     introspected mcp 2.2.0 API, tokens in `~/.mrp/tv_tokens.json` (outside the repo),
     one-shot loopback callback on localhost:8765, and headless runs that raise
@@ -255,8 +265,8 @@ writing code against it. Do not trust README summaries or memory.
     weekend date or a Yahoo window -> `confirmed: False`. Two firm dates that disagree
     still fail. **Phase 5 must read `confirmed` and never state an unconfirmed date as
     fact.**
-  - **Next:** user runs data,validate with regular-session bars -> if green, Phase 2
-    is done -> stop for review. Older note: once the scanner answers, map the two payloads -> Phase 2 done ->
+  - Done: the user ran data,validate with regular-session bars and it was green.
+    Older note: once the scanner answers, map the two payloads -> Phase 2 done ->
     stop for review. Earlier line kept for history: `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),
     the validate stage (close / market cap / next earnings vs TradingView, tolerances from
