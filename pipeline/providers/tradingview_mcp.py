@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import socket
 import threading
 import webbrowser
@@ -304,6 +305,12 @@ class TradingViewMCP:
                     return tools
 
     async def call_tool_async(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
+        if not is_read_only(name):
+            raise ProviderError(
+                f"refusing to call TradingView tool '{name}': the pipeline only reads. "
+                "The same account can create/delete alerts and edit watchlists, so any tool "
+                "that is not a get/list/search/screener call is blocked here."
+            )
         async with self._client() as client:
             return await client.call_tool(name, arguments or {})
 
@@ -609,6 +616,18 @@ def describe_result(result: Any, limit: int = 4000) -> str:
     return "\n".join(parts)
 
 
+_READ_PREFIXES = ("get-", "get_", "list-", "list_", "search-", "search_")
+_READ_NAMES = ("run-screener", "run_screener")
+
+
+def is_read_only(name: str) -> bool:
+    """True for tools that only read. TradingView's server mixes these with tools that
+    change the account (alerts, watchlists); names are `mcp-tv-<verb>-...` or
+    `mcp-watchlist-<verb>-...`, so the verb decides."""
+    base = re.sub(r"^mcp-(tv|watchlist)-", "", name)
+    return base.startswith(_READ_PREFIXES) or base in _READ_NAMES
+
+
 def parse_tool_args(pairs: list[str]) -> dict[str, Any]:
     """key=value pairs from the command line. Values are JSON when they parse as
     JSON (numbers, booleans, lists), otherwise plain strings. Avoids passing raw
@@ -621,5 +640,9 @@ def parse_tool_args(pairs: list[str]) -> dict[str, Any]:
         try:
             out[key] = json.loads(value)
         except ValueError:
-            out[key] = value
+            if value.startswith("[") and value.endswith("]"):
+                # PowerShell strips the inner quotes of ["A","B"], leaving [A,B]
+                out[key] = [item.strip() for item in value[1:-1].split(",") if item.strip()]
+            else:
+                out[key] = value
     return out

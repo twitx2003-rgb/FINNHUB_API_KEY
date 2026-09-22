@@ -26,6 +26,7 @@ from pipeline.providers.tradingview_mcp import (
     TradingViewMCP,
     describe_result,
     describe_tools,
+    is_read_only,
     parse_tool_args,
 )
 
@@ -267,6 +268,40 @@ def test_parse_tool_args_handles_json_and_strings():
         "symbol": "NASDAQ:NVDA", "limit": 5, "adjusted": True}
     with pytest.raises(ValueError):
         parse_tool_args(["oops"])
+
+
+def test_parse_tool_args_accepts_lists_after_powershell_strips_quotes():
+    # PowerShell turns symbols=["NASDAQ:NVDA","NASDAQ:AMD"] into symbols=[NASDAQ:NVDA,NASDAQ:AMD]
+    assert parse_tool_args(["symbols=[NASDAQ:NVDA, NASDAQ:AMD]"]) == {
+        "symbols": ["NASDAQ:NVDA", "NASDAQ:AMD"]}
+    assert parse_tool_args(['symbols=["NASDAQ:NVDA"]']) == {"symbols": ["NASDAQ:NVDA"]}
+
+
+@pytest.mark.parametrize("name,allowed", [
+    ("mcp-tv-get-ohlcv", True),
+    ("mcp-tv-get-earnings-calendar", True),
+    ("mcp-tv-list-alerts", True),
+    ("mcp-tv-search-symbols", True),
+    ("mcp-tv-run-screener", True),
+    ("mcp-watchlist-get-watchlist", True),
+    ("get_quote", True),
+    ("mcp-tv-create-alert", False),
+    ("mcp-tv-delete-alert", False),
+    ("mcp-tv-update-alert", False),
+    ("mcp-tv-restart-alerts", False),
+    ("mcp-tv-stop-alerts", False),
+    ("mcp-watchlist-add-to-watchlist", False),
+    ("mcp-watchlist-delete-watchlist", False),
+    ("mcp-watchlist-remove-from-watchlist", False),
+])
+def test_only_read_only_tools_are_callable(name, allowed):
+    assert is_read_only(name) is allowed
+
+
+def test_write_tool_is_refused_before_any_request():
+    client = TradingViewMCP(server=_fake_tradingview_mcp())
+    with pytest.raises(ProviderError, match="refusing to call"):
+        client.call_tool("mcp-tv-create-alert", {"symbol": "NASDAQ:NVDA", "price": 1})
 
 
 # ----------------------------------------------------------------- diagnostics

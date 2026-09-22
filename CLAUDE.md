@@ -157,7 +157,21 @@ writing code against it. Do not trust README summaries or memory.
       raw values from different days.
     - Yahoo `calendar`: `Earnings Date` came back as a single date (confirmed date); also
       EPS/revenue estimate ranges and dividend dates.
-  - **Waiting on live discovery from the user:** `--tradingview-tools` (tool names and schemas are unknown — public beta).
+  - **Tools discovered (35, names `mcp-tv-*` / `mcp-watchlist-*`; full schemas in the
+    user's `logs/tradingview_tools.json`).** All symbols are `EXCHANGE:TICKER`
+    (`NASDAQ:NVDA`). For stage 2:
+    - close: `mcp-tv-get-ohlcv(symbol, interval="1D", count<=5000, summary)`
+    - market cap: `mcp-tv-get-symbol-data(symbol, columns[])` — screener columns, catalog
+      via `mcp-tv-get-screener-columns(market, group, search)`
+    - next earnings: `mcp-tv-get-earnings-calendar(symbols[], date_from, date_to)`
+    - also useful later: `get-financials`, `get-financial-history`, `get-forecasts`,
+      `get-economic-data` (ECONOMICS:<CC><IND>), `get-documents`/`get-document-view`
+      (10-K/10-Q/transcripts — candidate input for phase 4), `get-news` (has `lang=he`).
+    - The same server can create/delete alerts and edit watchlists. `call_tool` refuses
+      anything that is not get/list/search/run-screener (`is_read_only`). Keep it that way.
+  - **Waiting on live output shapes from the user** (`--tradingview-call` for the three
+    tools above) — return formats are undocumented. Earlier line kept for history:
+    `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),
     the validate stage (close / market cap / next earnings vs TradingView, tolerances from
     `config.yaml`, write `validation.json`, raise `PipelineHalt` on any failed or

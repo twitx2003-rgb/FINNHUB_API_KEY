@@ -46,7 +46,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="List the tools TradingView's MCP server offers, then exit")
     parser.add_argument("--tradingview-call", nargs="+", metavar=("TOOL", "KEY=VALUE"),
                         help="Call one TradingView tool and print the raw result, e.g. "
-                             "--tradingview-call get_quote symbol=NASDAQ:NVDA")
+                             "--tradingview-call mcp-tv-get-ohlcv symbol=NASDAQ:NVDA count=5")
     parser.add_argument("--selftest", action="store_true",
                         help="Run the pipeline against synthetic data (no API key, no network) "
                              "to verify the installation, then exit")
