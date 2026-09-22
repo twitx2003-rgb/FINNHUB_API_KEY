@@ -42,7 +42,7 @@ class ValidateSettings:
     earnings_tolerance_days: int = 1
     tradingview_url: str = "https://mcp.tradingview.com/mcp"
     tradingview_token_path: str = "~/.mrp/tv_tokens.json"
-    tradingview_callback_host: str = "127.0.0.1"
+    tradingview_callback_host: str = "localhost"
     tradingview_callback_port: int = 8765
 
 

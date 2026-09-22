@@ -43,7 +43,7 @@ pip install -r requirements.txt
 Now verify the install before you have any credentials:
 
 ```bat
-python -m pytest -q          :: 72 offline tests
+python -m pytest -q          :: 77 offline tests
 python run.py --selftest     :: runs the real data stage against synthetic data
 ```
 

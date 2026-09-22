@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
@@ -89,6 +90,13 @@ class FileTokenStorage:
             pass
         os.replace(tmp, self.path)
 
+    def clear(self) -> None:
+        """Forget the registered client and its tokens (forces a fresh registration)."""
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            pass
+
     async def get_tokens(self):
         from mcp.shared.auth import OAuthToken
         raw = self._read().get("tokens")
@@ -107,14 +115,24 @@ class FileTokenStorage:
 
 
 # ------------------------------------------------------------------ OAuth callback
+class _IPv6Server(HTTPServer):
+    address_family = socket.AF_INET6
+
+
 class LocalCallback:
-    """One-shot HTTP server on the loopback interface that catches the OAuth redirect."""
+    """One-shot HTTP server on the loopback interface that catches the OAuth redirect.
+
+    The redirect URI says `localhost`, not `127.0.0.1`: TradingView's CDN answered
+    the authorize request with a CloudFront 403 when the redirect carried the IP
+    literal, and `localhost` is what known-good MCP clients register. Browsers may
+    resolve `localhost` to IPv6 first on Windows, so both loopback addresses listen.
+    """
 
     def __init__(self, host: str, port: int):
         self.host, self.port = host, port
         self._event = threading.Event()
         self._params: dict[str, str] = {}
-        self._server: HTTPServer | None = None
+        self._servers: list[HTTPServer] = []
 
     @property
     def redirect_uri(self) -> str:
@@ -143,8 +161,21 @@ class LocalCallback:
             def log_message(self, *args):  # keep the console clean
                 pass
 
-        self._server = HTTPServer((self.host, self.port), Handler)
-        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        if self.host == "localhost":
+            binds = [(HTTPServer, "127.0.0.1"), (_IPv6Server, "::1")]
+        else:
+            binds = [(_IPv6Server if ":" in self.host else HTTPServer, self.host)]
+
+        for server_cls, address in binds:
+            try:
+                server = server_cls((address, self.port), Handler)
+            except OSError as exc:
+                if address == "::1":            # no IPv6 loopback on this machine — fine
+                    log.debug("IPv6 loopback unavailable for the sign-in callback: %s", exc)
+                    continue
+                raise
+            self._servers.append(server)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
 
     async def wait(self, timeout: float = _SIGN_IN_TIMEOUT_S):
         from mcp.shared.auth import AuthorizationCodeResult
@@ -160,10 +191,10 @@ class LocalCallback:
                                        iss=self._params.get("iss"))
 
     def stop(self) -> None:
-        if self._server is not None:
-            self._server.shutdown()
-            self._server.server_close()
-            self._server = None
+        for server in self._servers:
+            server.shutdown()
+            server.server_close()
+        self._servers = []
 
 
 # -------------------------------------------------------------------------- client
@@ -172,10 +203,11 @@ class TradingViewMCP:
         self,
         url: str = DEFAULT_URL,
         token_path: str | Path = "~/.mrp/tv_tokens.json",
-        callback_host: str = "127.0.0.1",
+        callback_host: str = "localhost",
         callback_port: int = 8765,
         *,
         interactive: bool = False,
+        sign_in_timeout: float = _SIGN_IN_TIMEOUT_S,
         server: Any = None,
         open_browser: Callable[[str], Any] = webbrowser.open,
     ):
@@ -186,6 +218,7 @@ class TradingViewMCP:
         self._server = server
         self._open_browser = open_browser
         self._callback = LocalCallback(callback_host, callback_port)
+        self._sign_in_timeout = sign_in_timeout
 
     async def _on_redirect(self, auth_url: str) -> None:
         if not self.interactive:
@@ -197,7 +230,20 @@ class TradingViewMCP:
         self._open_browser(auth_url)
 
     async def _on_callback(self):
-        return await self._callback.wait()
+        return await self._callback.wait(self._sign_in_timeout)
+
+    async def _forget_client_if_redirect_changed(self) -> None:
+        """A client registered with another redirect URI cannot complete a sign-in
+        here (the server checks the redirect against the registration), so drop it
+        and let the SDK register afresh."""
+        info = await self.storage.get_client_info()
+        if info is None:
+            return
+        registered = [str(u) for u in (info.redirect_uris or [])]
+        if self._callback.redirect_uri not in registered:
+            log.info("stored TradingView client uses %s; re-registering with %s",
+                     registered, self._callback.redirect_uri)
+            self.storage.clear()
 
     @asynccontextmanager
     async def _client(self) -> AsyncIterator[Any]:
@@ -227,6 +273,7 @@ class TradingViewMCP:
             callback_handler=self._on_callback,
         )
         if self.interactive:
+            await self._forget_client_if_redirect_changed()
             self._callback.start()
         try:
             http = create_mcp_http_client(auth=auth)
@@ -366,6 +413,45 @@ def _compare_headers(url: str) -> list[str]:
         return [f"header check failed: {type(exc).__name__}: {exc}"]
 
 
+def _probe_authorize(authorization_endpoint: str, resource: str, port: int = 8765) -> list[str]:
+    """Send the authorize request with each redirect host and report whether the CDN
+    blocks it. The client_id is a placeholder: past the CDN the server should answer
+    with its own error or a redirect, which is exactly the 'not blocked' signal."""
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urlencode
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect)
+    lines = []
+    for host in ("127.0.0.1", "localhost"):
+        query = urlencode({
+            "response_type": "code", "client_id": "diagnostic-probe",
+            "redirect_uri": f"http://{host}:{port}{_CALLBACK_PATH}",
+            "state": "diagnostic", "code_challenge": "A" * 43, "code_challenge_method": "S256",
+            "resource": resource, "scope": "mcp:read mcp:tools",
+        })
+        req = urllib.request.Request(f"{authorization_endpoint}?{query}",
+                                     headers={"User-Agent": USER_AGENT})
+        try:
+            with opener.open(req, timeout=20) as resp:
+                status, headers, body = resp.status, resp.headers, b""
+        except urllib.error.HTTPError as exc:
+            status, headers = exc.code, exc.headers
+            body = exc.read() or b""
+        except OSError as exc:
+            lines.append(f"redirect host {host:<10} -> {type(exc).__name__}: {exc}")
+            continue
+        cdn_block = status == 403 and (b"cloudfront" in body.lower()
+                                       or "x-amz-cf-id" in {k.lower() for k in headers.keys()})
+        verdict = "BLOCKED by CDN" if cdn_block else "reached the sign-in server"
+        lines.append(f"redirect host {host:<10} -> {status}  {verdict}")
+    return lines
+
+
 def diagnose(url: str = DEFAULT_URL) -> list[str]:
     """What the server advertises about sign-in, and which client-identification
     route it allows: dynamic registration, a client ID metadata document, or neither."""
@@ -402,6 +488,12 @@ def diagnose(url: str = DEFAULT_URL) -> list[str]:
         out.append("")
         out.append(f"header check on {candidate}:")
         out.extend(f"  {line}" for line in _compare_headers(candidate))
+        if meta.get("authorization_endpoint"):
+            out.append("")
+            out.append("authorize request, by redirect host (a CDN block means the browser "
+                       "sign-in page will fail the same way):")
+            out.extend(f"  {line}" for line in _probe_authorize(
+                meta["authorization_endpoint"], resource.get("resource", url)))
         out.append("")
         out.append(f"summary for {issuer}:")
         out.append(f"  dynamic client registration : "

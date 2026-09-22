@@ -25,7 +25,7 @@ before the next one starts.
 
 ```
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m pytest -q                     # 72 offline tests
+.venv\Scripts\python.exe -m pytest -q                     # 77 offline tests (1 skips without IPv6)
 .venv\Scripts\python.exe run.py --selftest                # install check, no key/network
 .venv\Scripts\python.exe run.py --ticker NVDA --stages data
 .venv\Scripts\python.exe run.py --ticker NVDA --stages all
@@ -106,7 +106,7 @@ writing code against it. Do not trust README summaries or memory.
 - **Phase 2 (validate): IN PROGRESS.** The user has a TradingView plan (Essential+).
   - Built: `pipeline/providers/tradingview_mcp.py` — OAuth 2.1 client written against the
     introspected mcp 2.2.0 API, tokens in `~/.mrp/tv_tokens.json` (outside the repo),
-    one-shot loopback callback on 127.0.0.1:8765, and headless runs that raise
+    one-shot loopback callback on localhost:8765, and headless runs that raise
     `AuthorizationRequired` instead of waiting for a browser. Tested end to end against a
     local OAuth-protected MCP server (`tests/test_tradingview_mcp.py`): dynamic client
     registration, PKCE, token storage, headless reuse.
@@ -122,6 +122,14 @@ writing code against it. Do not trust README summaries or memory.
     request hook (`_identify_request`) sets User-Agent + Accept on every request, including
     the OAuth flow's own. `--tradingview-diagnose` now sends the metadata request both ways
     and prints both statuses. Tests reproduce the block with a stand-in.
+  - **Second live sign-in:** discovery and registration passed; the browser then showed a
+    CloudFront 403 on the authorize page. The one thing that differed from known-good MCP
+    clients was the redirect URI `http://127.0.0.1:8765/callback` (an IP literal in a query
+    parameter is a classic CDN/WAF block pattern). Now `http://localhost:8765/callback`,
+    with the callback listening on both 127.0.0.1 and ::1 (Windows may resolve localhost
+    to IPv6 first). A stored client registered with a different redirect is dropped so the
+    SDK re-registers. `--tradingview-diagnose` probes the authorize endpoint with both
+    redirect hosts and reports which one the CDN blocks — confirm the cause there.
   - **Live provider shapes (from `--discover-fundamentals NVDA`):**
     - LSE `fundamentals()`: keys `beta country currency current_price description
       dividend_yield exchange industry ipo_date logo_url market_cap name pe_ratio

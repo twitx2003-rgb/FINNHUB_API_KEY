@@ -60,9 +60,10 @@ validate:
   tradingview_url: "https://mcp.tradingview.com/mcp"
   # Holds a refresh token — kept in your user folder, outside the project.
   tradingview_token_path: "~/.mrp/tv_tokens.json"
-  # Where the browser is sent back after sign-in. The port must stay fixed:
-  # it is registered with TradingView on the first sign-in.
-  tradingview_callback_host: "127.0.0.1"
+  # Where the browser is sent back after sign-in. The port must stay fixed: it
+  # is registered with TradingView on the first sign-in. Use "localhost" — with
+  # "127.0.0.1" in the redirect, TradingView's CDN blocked the sign-in page.
+  tradingview_callback_host: "localhost"
   tradingview_callback_port: 8765
 
 # Stages that need their own interpreter (phase 4: PixelRAG needs an isolated
