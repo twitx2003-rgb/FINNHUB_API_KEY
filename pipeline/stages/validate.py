@@ -111,8 +111,12 @@ def check_earnings(ref: dict, theirs: dict, tolerance_days: int) -> dict:
     off = max((low - their_day).days, (their_day - high).days, 0)
     status = PASS if off <= tolerance_days else FAIL
     window = low.isoformat() if low == high else f"{low}..{high}"
+    # Companies report on trading days; a weekend date is a placeholder estimate.
+    weekend = [f"{who} date {d} is a {d:%A}" for who, d in
+               (("our", low), ("our", high), ("their", their_day)) if d.weekday() >= 5]
+    note = f" — {'; '.join(dict.fromkeys(weekend))}, so likely an estimate" if weekend else ""
     return _check(name, status,
-                  f"{window} vs {their_day} ({off} day(s) apart, tolerance {tolerance_days})",
+                  f"{window} vs {their_day} ({off} day(s) apart, tolerance {tolerance_days}){note}",
                   ours=[d.isoformat() for d in ours], theirs=their_day.isoformat(),
                   days_apart=off, tolerance_days=tolerance_days)
 

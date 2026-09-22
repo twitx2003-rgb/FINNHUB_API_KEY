@@ -36,6 +36,7 @@ before the next one starts.
 .venv\Scripts\python.exe run.py --tradingview-tools     # list TradingView MCP tools
 .venv\Scripts\python.exe run.py --tradingview-call TOOL key=value ...   # raw tool result
 .venv\Scripts\python.exe run.py --tradingview-token-status  # stored sign-in: expiry, refresh token (no secrets)
+.venv\Scripts\python.exe run.py --discover-session NVDA 2026-09-16  # is LSE's daily bar regular or extended hours
 ```
 
 Exit codes: 0 ok, 1 stage failed, 2 bad args, 3 validation HALT.
@@ -217,6 +218,24 @@ writing code against it. Do not trust README summaries or memory.
     Fix: `_StoredExpiryAuth._discover_for_refresh` runs the SDK's own PRM + AS metadata
     discovery (with our User-Agent) whenever a refresh is about to happen. The fake
     server's token endpoint moved to `/oauth/token` so tests can't pass by the guess.
+  - **Scanner answered; shapes mapped** (`market_cap_from_payload`,
+    `earnings_from_payload`): symbol data `{"success", "data": {"close",
+    "market_cap_basic"}}`; earnings `{"success", "data": {"count", "from", "to",
+    "earnings": [{"symbol", "release_date", "release_next_date", ...}]}}` (row picked by
+    exact symbol, exactly one). A payload that no longer parses is saved to
+    `logs/tradingview_payloads/` and raised as `ShapeNotMapped`. TradingView's next
+    date for the test ticker fell on a Saturday -> `check_earnings` flags weekend dates
+    as likely estimates.
+  - **Open data question: what LSE's daily close is.** `validation.json` now lists every
+    overlapping day. LSE vs TradingView (regular session only, per its own notice):
+    most days within a few hundredths of a percent, some past days ~0.5-0.8% apart,
+    and LSE's bar for a finished day kept changing through the evening. Hypothesis:
+    LSE daily bars include extended hours (close = last after-hours trade; would also
+    explain the LSE-vs-Yahoo volume gap). Test: `run.py --discover-session NVDA DATE`
+    rebuilds a day from LSE 5-minute candles (`LSEProvider.intraday`,
+    `pipeline/session_check.py`) and says which close/volume the daily bar matches.
+    If confirmed, decide with the user: regular-session bars built from LSE intraday,
+    or another OHLCV source. Until then `session_close: 16:15` may be too early for LSE.
   - **Next:** once the scanner answers, map the two payloads -> Phase 2 done ->
     stop for review. Earlier line kept for history: `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),

@@ -90,6 +90,29 @@ class LSEProvider(MarketDataProvider):
         # chronological order. The desc request is purely to pin the window end.
         return frame.sort_values("timestamp").reset_index(drop=True)
 
+    def intraday(self, symbol: str, timeframe: str, start: str, end: str) -> pd.DataFrame:
+        """Intraday candles between two ISO dates, oldest first (diagnostics only)."""
+        rows = self._call("candles", symbol=symbol, timeframe=timeframe, start=start, end=end,
+                          limit=_MAX_ROWS, order="asc")
+        if len(rows) >= _MAX_ROWS:
+            raise ProviderError(f"lse candles({symbol}, {timeframe}): {_MAX_ROWS}-row cap hit; "
+                                "narrow the window")
+        context = f"lse candles({symbol}, {timeframe})"
+        frame = pd.DataFrame({
+            "timestamp": [pick(r, ("timestamp", "ts"), context=context) for r in rows],
+            "open": [pick(r, ("open", "o"), context=context) for r in rows],
+            "high": [pick(r, ("high", "h"), context=context) for r in rows],
+            "low": [pick(r, ("low", "l"), context=context) for r in rows],
+            "close": [pick(r, ("close", "c"), context=context) for r in rows],
+            "volume": [pick_optional(r, ("volume", "v"), 0.0) for r in rows],
+        })
+        if frame.empty:
+            return frame
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, format="mixed")
+        for column in ("open", "high", "low", "close", "volume"):
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        return frame.sort_values("timestamp").reset_index(drop=True)
+
     # ---------------------------------------------------------------- options
     def options_chain(self, underlying: str, max_dte: int) -> pd.DataFrame:
         rows = self._chain_rows(underlying, 0, max_dte)
