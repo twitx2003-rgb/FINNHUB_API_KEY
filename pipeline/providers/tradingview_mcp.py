@@ -225,7 +225,12 @@ class TradingViewMCP:
             raise AuthorizationRequired(
                 "TradingView needs you to sign in. Run once: python run.py --auth-tradingview"
             )
-        print("\nOpening TradingView sign-in in your browser. If it does not open, visit:\n"
+        # TradingView's CDN blocks /accounts/signin/ when it arrives as a redirect from
+        # this authorize URL, so the sign-in must already exist in the browser.
+        print("\nSign in at https://www.tradingview.com in your default browser FIRST.\n"
+              "If the page shows 'ERROR: The request could not be satisfied', you were not\n"
+              "signed in: sign in on the main site, then run this command again.\n\n"
+              "Opening TradingView approval in your browser. If it does not open, visit:\n"
               f"  {auth_url}\n")
         self._open_browser(auth_url)
 

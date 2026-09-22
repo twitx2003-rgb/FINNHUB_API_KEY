@@ -142,6 +142,11 @@ writing code against it. Do not trust README summaries or memory.
     `run.py --tradingview-probe URL` follows the real URL hop by hop without cookies and
     names the hop the CDN blocks. Next evidence: that output, an InPrivate-window attempt,
     and whether the block appears before or after signing in/approving.
+  - **Sign-in SOLVED (fourth attempt).** The probe showed authorize -> 302 (client and
+    params accepted) and the CloudFront block on the *redirect target*
+    `/accounts/signin/` (hop 1). Signing in on tradingview.com first, in the default
+    browser, skips that redirect; `--auth-tradingview` then reached the approval screen
+    and completed. The sign-in prompt now says to sign in on the main site first.
   - **Live provider shapes (from `--discover-fundamentals NVDA`):**
     - LSE `fundamentals()`: keys `beta country currency current_price description
       dividend_yield exchange industry ipo_date logo_url market_cap name pe_ratio
@@ -152,8 +157,7 @@ writing code against it. Do not trust README summaries or memory.
       raw values from different days.
     - Yahoo `calendar`: `Earnings Date` came back as a single date (confirmed date); also
       EPS/revenue estimate ranges and dividend dates.
-  - **Waiting on live discovery from the user:** `--auth-tradingview` (with the header
-    fix) and `--tradingview-tools` (tool names and schemas are unknown — public beta).
+  - **Waiting on live discovery from the user:** `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),
     the validate stage (close / market cap / next earnings vs TradingView, tolerances from
     `config.yaml`, write `validation.json`, raise `PipelineHalt` on any failed or
