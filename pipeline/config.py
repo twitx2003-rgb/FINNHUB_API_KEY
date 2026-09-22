@@ -56,6 +56,10 @@ class ValidateSettings:
     tradingview_exchange: str = "NASDAQ"
     tradingview_symbols: dict[str, str] = field(default_factory=dict)
     rate_limit_delays: tuple[float, ...] = (5.0, 15.0, 45.0)
+    # When TradingView is rate limited, its last answer may stand in if younger
+    # than this (days). The close is always checked live.
+    saved_market_cap_max_age_days: float = 7
+    saved_earnings_max_age_days: float = 3
 
     def __post_init__(self):
         # YAML gives a list; keep the frozen dataclass hashable-friendly.

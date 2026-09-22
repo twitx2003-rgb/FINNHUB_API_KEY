@@ -283,3 +283,66 @@ def test_tradingview_symbol_mapping(ctx):
 def test_unknown_validate_provider_is_rejected(ctx):
     with pytest.raises(ConfigError):
         dataclasses.replace(ctx.settings.validate, provider="finnhub")
+
+
+# ------------------------------------------------------------ saved answers
+def test_rate_limited_call_uses_a_recent_saved_answer(ctx):
+    ValidateStage(lambda c: (agreeing_source(), "fake")).run(ctx)       # saves the answers
+    limited = agreeing_source()
+    limited.cap_error = RateLimited("scan: 429")
+    ValidateStage(lambda c: (limited, "fake")).run(ctx)                 # passes on the saved one
+    cap = next(c for c in ctx.read_json("validation")["checks"] if c["name"] == "market_cap")
+    assert cap["status"] == PASS and "theirs_saved_at" in cap and "rate limited" in cap["detail"]
+
+
+def test_saved_answer_older_than_the_limit_is_not_used(ctx):
+    from datetime import datetime, timedelta, timezone
+
+    from pipeline.stages.validate import SAVED_ANSWERS, SavedAnswers, fetch_or_saved
+
+    saved = SavedAnswers(ctx.run_dir.parent / SAVED_ANSWERS)
+    old = datetime.now(timezone.utc) - timedelta(days=8)
+    saved.put("NASDAQ:TEST", "market_cap", {"market_cap": 1.0, "price": 1.0}, old)
+
+    def limited():
+        raise RateLimited("scan: 429")
+
+    with pytest.raises(RateLimited, match="no saved answer from the last 7 day"):
+        fetch_or_saved(limited, saved, "NASDAQ:TEST", "market_cap", 7)
+
+
+def test_only_a_rate_limit_falls_back_to_the_saved_answer(ctx):
+    ValidateStage(lambda c: (agreeing_source(), "fake")).run(ctx)
+    broken = agreeing_source()
+    broken.cap_error = ShapeNotMapped("format changed")
+    with pytest.raises(PipelineHalt, match="market_cap=unverifiable"):
+        ValidateStage(lambda c: (broken, "fake")).run(ctx)
+
+
+def test_saved_answers_are_per_symbol(ctx):
+    from datetime import datetime, timezone
+
+    from pipeline.stages.validate import SAVED_ANSWERS, SavedAnswers
+
+    saved = SavedAnswers(ctx.run_dir.parent / SAVED_ANSWERS)
+    now = datetime.now(timezone.utc)
+    saved.put("NASDAQ:OTHER", "market_cap", {"market_cap": 1.0, "price": 1.0}, now)
+    assert saved.get("NASDAQ:TEST", "market_cap", 7, now) is None
+
+
+def test_seed_saved_answers_from_earlier_payloads(tmp_path, capsys):
+    import run
+
+    shutil.copy(ROOT / "config.yaml", tmp_path / "config.yaml")
+    settings = load_settings(tmp_path / "config.yaml", root=tmp_path)
+    folder = settings.log_dir / "tradingview_payloads"
+    folder.mkdir(parents=True)
+    (folder / "mcp-tv-get-symbol-data.json").write_text(json.dumps(SYMBOL_DATA))
+    earnings = json.loads(json.dumps(EARNINGS))
+    earnings["data"]["earnings"][0]["symbol"] = "NASDAQ:TEST"
+    (folder / "mcp-tv-get-earnings-calendar.json").write_text(json.dumps(earnings))
+
+    assert run.seed_saved_answers(settings, "TEST") == 0
+    saved = json.loads((settings.cache_dir / "TEST" / "tradingview_reference.json").read_text())
+    assert saved["NASDAQ:TEST"]["market_cap"]["value"] == {"market_cap": 5.0e10, "price": 50.0}
+    assert saved["NASDAQ:TEST"]["next_earnings"]["value"]["date"] == "2026-07-29"

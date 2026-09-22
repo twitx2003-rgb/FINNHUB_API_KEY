@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -54,6 +55,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tradingview-token-status", action="store_true",
                         help="Show whether a TradingView sign-in is stored, when it expires and "
                              "whether it can be renewed (prints no secrets)")
+    parser.add_argument("--seed-saved-answers", metavar="TICKER",
+                        help="One-off: save the TradingView answers already in "
+                             "logs/tradingview_payloads/ as the ticker's saved answers, dated by "
+                             "when each file was written")
     parser.add_argument("--check-timesfm", action="store_true",
                         help="Load the TimesFM model (downloads the weights on first use) and "
                              "forecast a known test series, to prove the install works")
@@ -262,6 +267,37 @@ def tradingview_call(settings, spec: list[str]) -> int:
     return 0
 
 
+def seed_saved_answers(settings, ticker: str) -> int:
+    """Turn earlier successful TradingView payloads into saved answers."""
+    from datetime import datetime, timezone
+
+    from pipeline.providers.tradingview_data import (
+        EARNINGS_TOOL, SYMBOL_DATA_TOOL, earnings_from_payload, market_cap_from_payload)
+    from pipeline.stages.validate import SAVED_ANSWERS, SavedAnswers
+
+    symbol = settings.validate.tradingview_symbol(ticker)
+    saved = SavedAnswers(settings.cache_dir / ticker / SAVED_ANSWERS)
+    folder = settings.log_dir / "tradingview_payloads"
+    seeded = 0
+    for kind, tool, parse in (("market_cap", SYMBOL_DATA_TOOL, market_cap_from_payload),
+                              ("next_earnings", EARNINGS_TOOL, earnings_from_payload)):
+        path = folder / f"{tool}.json"
+        if not path.exists():
+            print(f"  {kind:<14} no file {path}")
+            continue
+        try:
+            value = parse(json.loads(path.read_text(encoding="utf-8")), symbol)
+        except (ValueError, PipelineError) as exc:
+            print(f"  {kind:<14} not usable: {exc}")
+            continue
+        when = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+        saved.put(symbol, kind, value, when)
+        seeded += 1
+        print(f"  {kind:<14} saved (answer from {when:%Y-%m-%d %H:%M} UTC)")
+    print(f"\n{seeded} answer(s) saved to {saved.path}\n")
+    return 0 if seeded else 1
+
+
 def check_timesfm(settings) -> int:
     """Load the real model and forecast a series with a known answer."""
     import numpy as np
@@ -374,6 +410,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return selftest(settings)
+
+    if args.seed_saved_answers:
+        return seed_saved_answers(settings, args.seed_saved_answers.strip().upper())
 
     if args.check_timesfm:
         try:

@@ -20,6 +20,7 @@ stages must not present it as fact. Two firm dates that disagree still fail.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, timezone
 from typing import Any, Callable
@@ -179,6 +180,76 @@ def default_source(ctx: RunContext):
     return TradingViewData(client, delays=v.rate_limit_delays, dump_dir=dump_dir), "tradingview"
 
 
+# ---------------------------------------------------------- saved answers
+SAVED_ANSWERS = "tradingview_reference.json"
+
+
+class SavedAnswers:
+    """TradingView's last successful market-cap and earnings answers, per symbol.
+
+    TradingView's scanner (behind both tools) answers 429 for hours at a time,
+    while the values themselves move slowly: the share count changes quarterly
+    and an earnings date rarely moves. User decision (2026-09-23): when the live
+    call is rate limited, a saved answer no older than its limit stands in, and
+    the check says where it came from. Only a rate limit falls back — any other
+    failure still surfaces. The closing price is always checked live.
+
+    Kept per ticker, next to the run folders: cache/<TICKER>/tradingview_reference.json
+    """
+
+    def __init__(self, path):
+        self.path = path
+
+    def _read(self) -> dict:
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def put(self, symbol: str, kind: str, value: dict, now: datetime) -> None:
+        data = self._read()
+        data.setdefault(symbol, {})[kind] = {"value": value, "fetched_at": now.isoformat()}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def get(self, symbol: str, kind: str, max_age_days: float, now: datetime) -> dict | None:
+        entry = self._read().get(symbol, {}).get(kind)
+        if not entry:
+            return None
+        fetched = datetime.fromisoformat(entry["fetched_at"])
+        if (now - fetched).total_seconds() > max_age_days * 86400:
+            return None
+        return entry
+
+
+def fetch_or_saved(fetch: Callable[[], dict], saved: SavedAnswers, symbol: str, kind: str,
+                   max_age_days: float, now: datetime | None = None) -> tuple[dict, str | None]:
+    """The live answer (saved for next time), or — only when rate limited — a
+    recent saved one. Returns (value, fetched_at of the saved answer or None)."""
+    from ..providers.tradingview_data import RateLimited
+
+    now = now or datetime.now(timezone.utc)
+    try:
+        value = fetch()
+    except RateLimited as exc:
+        entry = saved.get(symbol, kind, max_age_days, now)
+        if entry is None:
+            raise RateLimited(f"{exc}; no saved answer from the last {max_age_days:g} day(s) "
+                              "to fall back on") from None
+        log.warning("%s: TradingView rate limited; using its answer saved at %s", kind,
+                    entry["fetched_at"])
+        return entry["value"], entry["fetched_at"]
+    saved.put(symbol, kind, value, now)
+    return value, None
+
+
+def _mark_saved(check: dict, fetched_at: str | None) -> dict:
+    if fetched_at:
+        check["theirs_saved_at"] = fetched_at
+        check["detail"] += f" [TradingView answer saved {fetched_at[:16].replace('T', ' ')} UTC; live call rate limited]"
+    return check
+
+
 # --------------------------------------------------------------------- stage
 class ValidateStage(Stage):
     name = "validate"
@@ -197,6 +268,7 @@ class ValidateStage(Stage):
                      if ctx.exists(REFERENCE_ARTIFACT, ".json") else {})
         symbol = v.tradingview_symbol(ctx.ticker)
         source, source_name = self.source_factory(ctx)
+        saved = SavedAnswers(ctx.run_dir.parent / SAVED_ANSWERS)
 
         def close_check():
             theirs = source.daily_bars(symbol, TV_BAR_COUNT)
@@ -209,13 +281,17 @@ class ValidateStage(Stage):
             ref = reference.get("market_cap") or {"error": "data_reference.json missing"}
             if "error" in ref:
                 return _check("market_cap", UNVERIFIABLE, f"no reference value: {ref['error']}")
-            return check_market_cap(ref, source.market_cap(symbol), v.market_cap_tolerance_pct)
+            theirs, saved_at = fetch_or_saved(lambda: source.market_cap(symbol), saved, symbol,
+                                              "market_cap", v.saved_market_cap_max_age_days)
+            return _mark_saved(check_market_cap(ref, theirs, v.market_cap_tolerance_pct), saved_at)
 
         def earnings_check():
             ref = reference.get("next_earnings") or {"error": "data_reference.json missing"}
             if "error" in ref:
                 return _check("next_earnings", UNVERIFIABLE, f"no reference value: {ref['error']}")
-            return check_earnings(ref, source.next_earnings(symbol), v.earnings_tolerance_days)
+            theirs, saved_at = fetch_or_saved(lambda: source.next_earnings(symbol), saved, symbol,
+                                              "next_earnings", v.saved_earnings_max_age_days)
+            return _mark_saved(check_earnings(ref, theirs, v.earnings_tolerance_days), saved_at)
 
         checks = [_run_check(name, fn) for name, fn in (
             ("last_close", close_check), ("market_cap", cap_check),

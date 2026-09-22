@@ -37,6 +37,8 @@ before the next one starts.
 .venv\Scripts\python.exe run.py --tradingview-call TOOL key=value ...   # raw tool result
 .venv\Scripts\python.exe run.py --tradingview-token-status  # stored sign-in: expiry, refresh token (no secrets)
 .venv\Scripts\python.exe run.py --discover-session NVDA 2026-09-16  # is LSE's daily bar regular or extended hours
+.venv\Scripts\python.exe run.py --check-timesfm            # load TimesFM, forecast a known wave
+.venv\Scripts\python.exe run.py --seed-saved-answers NVDA   # bootstrap saved TradingView answers
 ```
 
 Exit codes: 0 ok, 1 stage failed, 2 bad args, 3 validation HALT.
@@ -105,7 +107,18 @@ writing code against it. Do not trust README summaries or memory.
   the closing auction and some venues — unconfirmed. Stage 2 cross-checks every run
   against TradingView, which will settle the close question; which source feeds the
   phase 3 volume forecast is decided then (consider cross-checking volume in stage 2).
-- **Phase 3 (forecast, TimesFM): BUILT, waiting on the first live run.** Phase 2 was
+- **TradingView scanner 429 is chronic** (hours at a time; blocked phase-3 runs twice).
+  **User decision: keep last answers.** `validate.SavedAnswers` stores each successful
+  market-cap / earnings answer per symbol in `cache/<TICKER>/tradingview_reference.json`;
+  `fetch_or_saved` falls back ONLY on `RateLimited`, and only to an answer younger than
+  `saved_market_cap_max_age_days` (7) / `saved_earnings_max_age_days` (3). The check
+  records `theirs_saved_at` and says so in its detail. Close is always live.
+  `run.py --seed-saved-answers TICKER` turns the success payloads in
+  `logs/tradingview_payloads/` into saved answers dated by file mtime (one-off bootstrap).
+- **Phase 3 (forecast, TimesFM): BUILT; model verified on the user's machine** —
+  `--check-timesfm` continued a known wave with mean error 0.03 (amplitude 10);
+  weights 1.32 GB, first load 164 s incl. download; forecast < 1 s. First NVDA run
+  still pending (validate halted on the scanner 429). Phase 2 was
   approved by the user. API read from the timesfm 3.0.2 wheel source, not the README:
   `from timesfm3 import TimesFM3Forecaster`; `.from_pretrained("google/timesfm-3.0-pytorch",
   device=, revision=, per_core_batch_size=)`; `.config.quantiles` = 0.1..0.9;

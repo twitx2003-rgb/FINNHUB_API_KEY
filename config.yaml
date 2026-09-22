@@ -84,6 +84,12 @@ validate:
   tradingview_symbols: {}
   # Seconds to wait between retries when TradingView answers 429 (rate limit).
   rate_limit_delays: [5, 15, 45]
+  # TradingView's scanner (market cap, earnings) is often rate limited for hours.
+  # Each successful answer is saved in cache/<TICKER>/tradingview_reference.json;
+  # when the live call is rate limited, a saved answer younger than this many days
+  # is used instead and the check says so. The close is always checked live.
+  saved_market_cap_max_age_days: 7
+  saved_earnings_max_age_days: 3
 
   # Every check must pass. A check that cannot run (rate limit, sign-in needed,
   # missing reference value) counts as "unverifiable" and halts the run too.
