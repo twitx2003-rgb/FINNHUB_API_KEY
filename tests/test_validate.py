@@ -40,6 +40,8 @@ def bars(closes, start="2026-05-04"):
 def test_close_within_tolerance_passes():
     c = check_close(bars([100, 101, 102]), bars([100, 101, 102.3]), 0.5)
     assert c["status"] == PASS and c["date"] == "2026-05-06" and c["overlap_days"] == 3
+    assert [row["date"] for row in c["overlap"]] == ["2026-05-04", "2026-05-05", "2026-05-06"]
+    assert c["overlap"][0]["diff_pct"] == 0 and c["overlap_max_diff_pct"] == c["overlap"][-1]["diff_pct"]
 
 
 def test_close_beyond_tolerance_fails():

@@ -67,14 +67,20 @@ def check_close(ours: pd.DataFrame, theirs: pd.DataFrame, tolerance_pct: float) 
     o, t = float(our_by_day[day]), float(their_by_day[day])
     diff = pct_diff(o, t)
     common = our_by_day.index.intersection(their_by_day.index)
-    recent = max(pct_diff(float(our_by_day[d]), float(their_by_day[d])) for d in common)
+    # Every overlapping day, not just the checked one: tells a one-day effect
+    # (e.g. a bar still moving after hours) apart from a systematic difference.
+    overlap = [{"date": d.isoformat(), "ours": float(our_by_day[d]),
+                "theirs": float(their_by_day[d]),
+                "diff_pct": round(pct_diff(float(our_by_day[d]), float(their_by_day[d])), 4)}
+               for d in common]
+    recent = max(row["diff_pct"] for row in overlap)
     status = PASS if diff <= tolerance_pct else FAIL
     return _check(name, status,
                   f"{day}: {o:.4f} vs {t:.4f} ({diff:.3f}% {'<=' if status == PASS else '>'} "
                   f"{tolerance_pct}%)",
                   date=day.isoformat(), ours=o, theirs=t, diff_pct=round(diff, 4),
                   tolerance_pct=tolerance_pct, overlap_days=len(common),
-                  overlap_max_diff_pct=round(recent, 4))
+                  overlap_max_diff_pct=recent, overlap=overlap)
 
 
 def check_market_cap(ref: dict, theirs: dict, tolerance_pct: float) -> dict:
