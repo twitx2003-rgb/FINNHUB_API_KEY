@@ -17,7 +17,7 @@ output, so any stage can be rerun on its own.
 | Phase | Stage(s) | State |
 |---|---|---|
 | 1 | `data` | **done** — accepted against live data |
-| 2 | `validate` | **in progress** — TradingView connection built, mapping pending |
+| 2 | `validate` | **in progress** — close check live; market cap + earnings wait on TradingView (429) |
 | 3 | `forecast` (TimesFM) | planned |
 | 4 | `docs`, `extract` | planned |
 | 5 | `forecast` (Kronos), `debate`, `report` | planned |

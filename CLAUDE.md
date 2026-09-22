@@ -180,10 +180,27 @@ writing code against it. Do not trust README summaries or memory.
       `tradingview api: https://scanner.tradingview.com/america/scan: 429` (rate limit behind
       the MCP server). `TradingViewData.fetch` retries 429 only (5/15/45s); the raw
       `--tradingview-call` retries too (10/30s). Their success shapes are still unknown.
-  - **Waiting on:** a successful `get-symbol-data` (market cap column) and
-    `get-earnings-calendar` result. If the scanner stays at 429, fall back to
-    `get-financials` for market cap and Yahoo-vs-? for earnings — decide with the user.
-    Earlier line kept for history: `--tradingview-tools` (tool names and schemas are unknown — public beta).
+  - The scanner stayed at 429 across retries (10/30s) and for `get-financials` too.
+    **User decision: wait for TradingView** (no Finnhub fallback for now).
+  - **Built: the validate stage** (`pipeline/stages/validate.py`). Checks, each
+    pass / fail / unverifiable; anything but pass -> `validation.json` status fail and
+    `PipelineHalt` (exit 3); the gate lists non-passing checks.
+    - `last_close`: our newest completed close vs TradingView's close that day
+      (TV bars go through `drop_incomplete_session` too). Fails if TV has completed
+      sessions newer than ours ("rerun data") or no bar for our day.
+    - `market_cap`: implied shares (cap / price it was computed at) on both sides.
+    - `next_earnings`: TV date inside our Yahoo date/window +- `earnings_tolerance_days`.
+    - Data stage now writes `data_reference.json` via provider `market_cap_snapshot` /
+      `next_earnings` (LSE fundamentals, Yahoo calendar; failures recorded as `error`,
+      turned into unverifiable by stage 2).
+    - `TradingViewData.market_cap` / `.next_earnings` call the real tools but raise
+      `ShapeNotMapped` on success and save the payload to
+      `logs/tradingview_payloads/<tool>.json` — the success format is unknown, so the
+      validate output tells the user to send that file. Map it then; do not guess.
+    - `validate.provider: synthetic` (`SyntheticSource`) is used by `--selftest`, which
+      now runs data + validate and opens the gate.
+  - **Next:** once the scanner answers, map the two payloads -> Phase 2 done ->
+    stop for review. Earlier line kept for history: `--tradingview-tools` (tool names and schemas are unknown — public beta).
   - Then build: market cap + earnings dates into the data stage (`data_reference.json`),
     the validate stage (close / market cap / next earnings vs TradingView, tolerances from
     `config.yaml`, write `validation.json`, raise `PipelineHalt` on any failed or

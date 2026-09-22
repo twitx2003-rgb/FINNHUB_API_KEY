@@ -6,6 +6,7 @@ second opinion — stage 2 cross-checks against an independent source instead.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import pandas as pd
 
@@ -43,6 +44,26 @@ def fred_series(label: str) -> pd.DataFrame:
     part["series"] = label
     part["source_symbol"] = code
     return part[["timestamp", "series", "source_symbol", "value"]].dropna().reset_index(drop=True)
+
+
+def yahoo_next_earnings(symbol: str) -> dict[str, Any]:
+    """Next earnings date(s) from Yahoo's calendar. LSE has no earnings dates.
+
+    `Earnings Date` is a list: one date when confirmed, two (a window) when
+    only estimated.
+    """
+    import yfinance as yf
+
+    calendar = yf.Ticker(symbol).calendar or {}
+    if "Earnings Date" not in calendar:
+        raise ProviderError(f"yahoo calendar({symbol}): no 'Earnings Date'. "
+                            f"Actual keys: {sorted(calendar)}")
+    raw = calendar["Earnings Date"]
+    values = raw if isinstance(raw, (list, tuple)) else [raw]
+    dates = sorted(pd.Timestamp(v).date().isoformat() for v in values if v is not None)
+    if not dates:
+        raise ProviderError(f"yahoo calendar({symbol}): 'Earnings Date' is empty")
+    return {"dates": dates, "source": "yahoo"}
 
 
 class YFinanceFredProvider(MarketDataProvider):
@@ -111,6 +132,18 @@ class YFinanceFredProvider(MarketDataProvider):
             return _empty()
         from ..contracts import normalize_options
         return normalize_options(pd.concat(frames, ignore_index=True))
+
+    def market_cap_snapshot(self, symbol: str) -> dict[str, Any]:
+        import yfinance as yf
+
+        info = yf.Ticker(symbol).fast_info
+        cap, price = info.market_cap, info.last_price
+        if not cap or not price:
+            raise ProviderError(f"yahoo fast_info({symbol}): market_cap={cap!r} last_price={price!r}")
+        return {"market_cap": float(cap), "price": float(price), "as_of": None, "source": "yahoo"}
+
+    def next_earnings(self, symbol: str) -> dict[str, Any]:
+        return yahoo_next_earnings(symbol)
 
     def macro_series(self, cpi_series: str, yield_series: str) -> pd.DataFrame:
         """FRED copies of the pipeline's macro series. The config codes are LSE

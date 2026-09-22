@@ -262,6 +262,28 @@ class LSEProvider(MarketDataProvider):
         """Raw fundamentals snapshot (market cap, PE, margins...) — shape not yet mapped."""
         return self._call("fundamentals", symbol=symbol)
 
+    def market_cap_snapshot(self, symbol: str) -> dict[str, Any]:
+        """Market cap in raw USD with the price it was computed at.
+
+        The snapshot is not refreshed with the bars (live run: its price was the
+        previous session's close), so stage 2 compares implied share counts
+        (cap / price), never raw caps from different days.
+        """
+        context = f"lse fundamentals({symbol})"
+        rows = self.fundamentals_rows(symbol)
+        if not rows:
+            raise ProviderError(f"{context}: no rows")
+        row = rows[0]
+        cap = pick(row, ["market_cap"], context=context)
+        price = pick(row, ["current_price"], context=context, allow_null=True)
+        as_of = pick(row, ["updated_at"], context=context, allow_null=True)
+        return {"market_cap": float(cap), "price": None if price is None else float(price),
+                "as_of": None if as_of is None else str(as_of), "source": "lse"}
+
+    def next_earnings(self, symbol: str) -> dict[str, Any]:
+        from .yf_fred import yahoo_next_earnings
+        return yahoo_next_earnings(symbol)
+
     def list_economics(self) -> list[dict[str, Any]]:
         """Catalogue of macro series — used by `run.py --discover-macro`."""
         return self._call("economics")

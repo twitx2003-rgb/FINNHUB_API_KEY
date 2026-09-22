@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
@@ -33,6 +34,9 @@ from .base import pick
 log = logging.getLogger(__name__)
 
 OHLCV_TOOL = "mcp-tv-get-ohlcv"
+SYMBOL_DATA_TOOL = "mcp-tv-get-symbol-data"
+EARNINGS_TOOL = "mcp-tv-get-earnings-calendar"
+MARKET_CAP_COLUMNS = ["close", "market_cap_basic"]
 RATE_LIMIT_DELAYS = (5.0, 15.0, 45.0)
 
 
@@ -42,6 +46,14 @@ class ToolFailed(ProviderError):
 
 class RateLimited(ToolFailed):
     """The failure is a 429 from TradingView's backend; worth retrying."""
+
+
+class ShapeNotMapped(ProviderError):
+    """The tool answered, but its success format has not been seen yet.
+
+    Raised instead of guessing field names. The payload is saved so it can be
+    looked at and mapped.
+    """
 
 
 def tool_payload(result: Any, tool: str) -> dict[str, Any]:
@@ -111,10 +123,11 @@ class TradingViewData:
     """Read-only data calls on top of a TradingViewMCP client."""
 
     def __init__(self, client: Any, *, delays: tuple[float, ...] = RATE_LIMIT_DELAYS,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep, dump_dir: Path | None = None):
         self.client = client
         self.delays = delays
         self.sleep = sleep
+        self.dump_dir = dump_dir
 
     def fetch(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Call a tool and return its checked payload, retrying only on 429."""
@@ -132,3 +145,26 @@ class TradingViewData:
     def daily_bars(self, symbol: str, count: int = 10) -> pd.DataFrame:
         payload = self.fetch(OHLCV_TOOL, {"symbol": symbol, "interval": "1D", "count": count})
         return bars_frame(payload, symbol)
+
+    def market_cap(self, symbol: str) -> dict[str, Any]:
+        """{"market_cap", "price"} — not mapped yet: the scanner has only answered 429."""
+        payload = self.fetch(SYMBOL_DATA_TOOL, {"symbol": symbol, "columns": MARKET_CAP_COLUMNS})
+        raise self._unmapped(SYMBOL_DATA_TOOL, payload)
+
+    def next_earnings(self, symbol: str) -> dict[str, Any]:
+        """{"date"} — not mapped yet: the scanner has only answered 429."""
+        payload = self.fetch(EARNINGS_TOOL, {"symbols": [symbol]})
+        raise self._unmapped(EARNINGS_TOOL, payload)
+
+    def _unmapped(self, tool: str, payload: dict[str, Any]) -> ShapeNotMapped:
+        where = "not saved"
+        if self.dump_dir is not None:
+            self.dump_dir.mkdir(parents=True, exist_ok=True)
+            target = self.dump_dir / f"{tool}.json"
+            target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            where = str(target)
+        return ShapeNotMapped(
+            f"{tool} answered, but its format has not been mapped yet (keys: "
+            f"{sorted(payload)}). Response saved to {where} — send it so the check can be "
+            "finished. Not guessing field names."
+        )

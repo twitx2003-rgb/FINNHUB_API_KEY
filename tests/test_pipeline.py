@@ -78,16 +78,18 @@ def test_downstream_stage_gate_blocks_without_validation(ctx):
 FakeProvider = SyntheticProvider
 
 
-def test_data_stage_writes_all_three_artifacts(ctx, monkeypatch, capsys):
+def test_data_stage_writes_all_artifacts(ctx, monkeypatch, capsys):
     monkeypatch.setattr("pipeline.stages.data.get_provider",
                         lambda name, settings=None: FakeProvider())
 
     result = DataStage().run(ctx)
 
     assert result.status == "ok"
-    assert set(result.artifacts) == {"data_ohlcv", "data_options", "data_macro"}
-    for artifact in result.artifacts:
+    assert set(result.artifacts) == {"data_ohlcv", "data_options", "data_macro", "data_reference"}
+    for artifact in set(result.artifacts) - {"data_reference"}:
         assert ctx.exists(artifact), f"{artifact}.parquet was not written"
+    reference = ctx.read_json("data_reference")
+    assert reference["market_cap"]["price"] > 0 and reference["next_earnings"]["dates"]
 
     # Stored chronologically, regardless of the desc request used to fetch it.
     ohlcv = ctx.read_parquet("data_ohlcv")

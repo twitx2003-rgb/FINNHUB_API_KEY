@@ -28,7 +28,8 @@ def require_validation_pass(ctx: RunContext) -> dict:
     report = ctx.read_json(VALIDATION_ARTIFACT)
     status = report.get("status")
     if status != "pass":
-        failed = [c.get("name") for c in report.get("checks", []) if c.get("status") == "fail"]
+        failed = [f"{c.get('name')}={c.get('status')}" for c in report.get("checks", [])
+                  if c.get("status") != "pass"]
         raise PipelineHalt(
             f"Validation status is '{status}' for {ctx.ticker} {ctx.run_date}"
             + (f" (failed: {', '.join(filter(None, failed))})" if failed else "")

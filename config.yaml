@@ -48,6 +48,10 @@ data:
   macro_max_age_monthly: 75
   macro_fallback: fred
 
+  # Save market cap (LSE fundamentals) and next earnings date (Yahoo calendar) to
+  # data_reference.json for stage 2 to cross-check.
+  fetch_reference: true
+
 validate:
   # Second source for the cross-check: TradingView's official MCP server
   # (OAuth 2.1, needs a paid TradingView plan). Sign in once with:
@@ -61,10 +65,21 @@ validate:
   # Holds a refresh token — kept in your user folder, outside the project.
   tradingview_token_path: "~/.mrp/tv_tokens.json"
   # Where the browser is sent back after sign-in. The port must stay fixed: it
-  # is registered with TradingView on the first sign-in. Use "localhost" — with
-  # "127.0.0.1" in the redirect, TradingView's CDN blocked the sign-in page.
+  # is registered with TradingView on the first sign-in. Sign in on
+  # tradingview.com first: TradingView's CDN blocks its sign-in page when that
+  # page is reached as a redirect from the approval URL.
   tradingview_callback_host: "localhost"
   tradingview_callback_port: 8765
+
+  # TradingView names symbols EXCHANGE:TICKER. Tickers not listed below get
+  # tradingview_exchange as their prefix (NVDA -> NASDAQ:NVDA).
+  tradingview_exchange: "NASDAQ"
+  tradingview_symbols: {}
+  # Seconds to wait between retries when TradingView answers 429 (rate limit).
+  rate_limit_delays: [5, 15, 45]
+
+  # Every check must pass. A check that cannot run (rate limit, sign-in needed,
+  # missing reference value) counts as "unverifiable" and halts the run too.
 
 # Stages that need their own interpreter (phase 4: PixelRAG needs an isolated
 # venv). Empty means "use the current interpreter".

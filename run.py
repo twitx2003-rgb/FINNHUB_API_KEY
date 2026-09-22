@@ -212,9 +212,11 @@ def selftest(settings) -> int:
     from pathlib import Path as _Path
 
     from pipeline.cache import make_run_context
+    from pipeline.gate import require_validation_pass
     from pipeline.stages.data import DataStage, print_close_preview
+    from pipeline.stages.validate import ValidateStage
 
-    print("\nSelf-test: running the data stage against synthetic data "
+    print("\nSelf-test: running the data and validate stages against synthetic data "
           "(no API key, no network).\n")
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -222,18 +224,23 @@ def selftest(settings) -> int:
         ctx = make_run_context(scratch, "SELFTEST", "1970-01-01")
         result = DataStage().run(ctx)
 
-        expected = {"data_ohlcv", "data_options", "data_macro"}
+        expected = {"data_ohlcv", "data_options", "data_macro", "data_reference"}
         missing = expected - set(result.artifacts)
         if missing or result.status != "ok":
             print(f"  FAILED: status={result.status} missing={sorted(missing)}")
             return 1
-        for artifact in sorted(expected):
+        for artifact in sorted(expected - {"data_reference"}):
             rows = len(ctx.read_parquet(artifact))
             print(f"  ok  {artifact:<14} {rows} rows")
+
+        ValidateStage().run(ctx)
+        for check in require_validation_pass(ctx)["checks"]:
+            print(f"  ok  validate: {check['name']:<14} {check['status']}")
         print_close_preview(ctx, rows=3)
 
     print("Self-test passed. The install is sound — pandas, pyarrow, Parquet IO,\n"
-          "contracts, the ordering/freshness guards and the stage runner all work.\n"
+          "contracts, the ordering/freshness guards, the validation gate and the\n"
+          "stage runner all work.\n"
           "Add LSE_API_KEY to .env, then run:  python run.py --ticker NVDA --stages data\n")
     return 0
 
@@ -247,6 +254,7 @@ def replace_cache_dir(settings, cache_dir):
         # No fallbacks: the self-test must never touch the network.
         data=dataclasses.replace(settings.data, provider="synthetic", fallback_provider=None,
                                  macro_fallback=None),
+        validate=dataclasses.replace(settings.validate, provider="synthetic"),
     )
 
 

@@ -53,6 +53,17 @@ class SyntheticProvider(MarketDataProvider):
             "open_interest": [100.0, 200.0],
         })
 
+    SHARES = 1_000_000_000.0
+
+    def market_cap_snapshot(self, symbol: str) -> dict:
+        price = float(self.daily_ohlcv(symbol, self.bars)["close"].iloc[-1])
+        return {"market_cap": price * self.SHARES, "price": price, "as_of": None,
+                "source": "synthetic"}
+
+    def next_earnings(self, symbol: str) -> dict:
+        day = (datetime.now(timezone.utc) + timedelta(days=30)).date().isoformat()
+        return {"dates": [day], "source": "synthetic"}
+
     def macro_series(self, cpi_series: str, yield_series: str) -> pd.DataFrame:
         months = pd.date_range(end=datetime.now(timezone.utc), periods=4, freq="ME", tz="UTC")
         return pd.DataFrame({

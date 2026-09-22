@@ -32,6 +32,7 @@ class DataSettings:
     macro_max_age_daily: int = 7
     macro_max_age_monthly: int = 75
     macro_fallback: str | None = "fred"
+    fetch_reference: bool = True
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,20 @@ class ValidateSettings:
     tradingview_token_path: str = "~/.mrp/tv_tokens.json"
     tradingview_callback_host: str = "localhost"
     tradingview_callback_port: int = 8765
+    tradingview_exchange: str = "NASDAQ"
+    tradingview_symbols: dict[str, str] = field(default_factory=dict)
+    rate_limit_delays: tuple[float, ...] = (5.0, 15.0, 45.0)
+
+    def __post_init__(self):
+        # YAML gives a list; keep the frozen dataclass hashable-friendly.
+        object.__setattr__(self, "rate_limit_delays", tuple(float(d) for d in self.rate_limit_delays))
+        if self.provider not in ("tradingview_mcp", "synthetic"):
+            raise ConfigError(f"validate.provider must be 'tradingview_mcp' or 'synthetic', "
+                              f"got '{self.provider}'")
+
+    def tradingview_symbol(self, ticker: str) -> str:
+        """NVDA -> NASDAQ:NVDA, unless tradingview_symbols maps it explicitly."""
+        return self.tradingview_symbols.get(ticker) or f"{self.tradingview_exchange}:{ticker}"
 
 
 @dataclass(frozen=True)

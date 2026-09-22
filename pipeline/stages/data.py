@@ -107,6 +107,16 @@ class DataStage(Stage):
                 log.warning("no macro rows — check data.cpi_series / data.yield_series "
                             "in config.yaml, or run: python run.py --discover-macro")
 
+        # ---- reference values for stage 2 --------------------------------
+        if cfg.fetch_reference:
+            reference = collect_reference(provider, ctx.ticker)
+            ctx.write_json(REFERENCE_ARTIFACT, reference)
+            artifacts.append(REFERENCE_ARTIFACT)
+            for name, part in reference.items():
+                if "error" in part:
+                    log.warning("reference %s unavailable: %s — stage 2 will not be able "
+                                "to verify it", name, part["error"])
+
         latest = ohlcv.iloc[-1]
         return StageResult(
             stage=self.name,
@@ -127,6 +137,28 @@ class DataStage(Stage):
             log.warning("primary provider '%s' unavailable (%s); falling back to '%s'",
                         cfg.provider, exc, cfg.fallback_provider)
             return get_provider(cfg.fallback_provider, ctx.settings), cfg.fallback_provider
+
+
+REFERENCE_ARTIFACT = "data_reference"
+
+
+def collect_reference(provider, ticker: str) -> dict:
+    """Market cap and next earnings, for stage 2 to cross-check.
+
+    A failure is recorded, not raised: these values are not inputs to later
+    stages, only claims to verify, and stage 2 turns a missing one into
+    "unverifiable", which halts the run anyway — with the reason on record.
+    """
+    out: dict = {}
+    for name, lookup in (("market_cap", provider.market_cap_snapshot),
+                         ("next_earnings", provider.next_earnings)):
+        try:
+            value = lookup(ticker)
+            out[name] = value if value is not None else {
+                "error": f"provider '{getattr(provider, 'name', '?')}' does not offer it"}
+        except Exception as exc:  # noqa: BLE001 — recorded, then enforced by stage 2
+            out[name] = {"error": f"{type(exc).__name__}: {exc}"}
+    return out
 
 
 def atm_iv(options: pd.DataFrame, spot: float | None, target_dte: int = 30) -> float | None:

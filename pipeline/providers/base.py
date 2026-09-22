@@ -27,6 +27,15 @@ class MarketDataProvider(ABC):
     @abstractmethod
     def macro_series(self, cpi_series: str, yield_series: str) -> pd.DataFrame: ...
 
+    # Reference values stage 2 cross-checks. Optional: None means "not offered".
+    def market_cap_snapshot(self, symbol: str) -> dict[str, Any] | None:
+        """{"market_cap": USD, "price": the price that cap was computed at, "as_of", "source"}"""
+        return None
+
+    def next_earnings(self, symbol: str) -> dict[str, Any] | None:
+        """{"dates": [ISO date, ...] (one date, or a start/end window), "source"}"""
+        return None
+
 
 def pick(row: dict[str, Any], candidates: Sequence[str], *, context: str,
          allow_null: bool = False) -> Any:
