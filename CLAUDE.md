@@ -158,6 +158,18 @@ writing code against it. Do not trust README summaries or memory.
   (docs say X05) — `raw_xml_name` takes the basename, so any folder works.
   `--discover-sec` now also prints every leaf field of the newest Schedule 13G so the
   >5%-holder mapping can be written from the real shape.
+- **Second live SEC run (2026-09-23):**
+  - The newest `SCHEDULE 13G` in NVIDIA's list was filed BY NVIDIA about ANOTHER issuer
+    (its stake in Nebius). A company's submissions contain its own stakes too — filter on
+    `issuerCik`. Structured 13G shape recorded in `sec_edgar.parse_schedule13` (root
+    `edgarSubmission`, per-person `coverPageHeaderReportingPersonDetails`, event date
+    MM/DD/YYYY). Whether holders OF NVDA appear in NVDA's own list at all is unknown:
+    `--discover-sec` now lists every 13G/13D with "holder OF" vs "stake in".
+  - First full extract run: 35 Form 4 filings / 59 rows in 180 days, 0 open-market buys,
+    29 sales, but only 1.1% of sold shares flagged 10b5-1 — suspiciously low. Not
+    trusted yet: `--discover-sec` now prints `plan_evidence` (the `aff10b5One` element as
+    filed, plan footnotes, remarks) for the newest Form 4 with a sale.
+  - Holders are not in the extract stage yet — waiting on that listing.
 - **SEC_USER_AGENT is asked for, not hand-edited:** the user struggled to add it to .env
   (typed the line into PowerShell). `Settings.env_or_ask` prompts at an interactive
   terminal, validates (must contain "@"), appends to .env (newline-safe) and sets it for

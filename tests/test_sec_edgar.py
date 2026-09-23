@@ -273,3 +273,65 @@ def test_no_terminal_means_no_question(tmp_path, monkeypatch):
     with pytest.raises(ConfigError, match="not set"):
         settings.env_or_ask("SEC_USER_AGENT", "q?", ask=lambda p: pytest.fail("asked"),
                             is_interactive=False)
+
+
+# --------------------------------------------------------------- Schedule 13
+def schedule13(issuer_cik=CIK, persons=(("BIG FUND LP", "1000000.00", "7.5", "IA"),),
+               event="07/13/2026", form="SCHEDULE 13G"):
+    people = "".join(f"""<coverPageHeaderReportingPersonDetails>
+        <reportingPersonName>{n}</reportingPersonName>
+        <reportingPersonBeneficiallyOwnedAggregateNumberOfShares>{sh}</reportingPersonBeneficiallyOwnedAggregateNumberOfShares>
+        <classPercent>{pc}</classPercent><typeOfReportingPerson>{t}</typeOfReportingPerson>
+      </coverPageHeaderReportingPersonDetails>""" for n, sh, pc, t in persons)
+    return f"""<?xml version="1.0"?>
+<edgarSubmission><schemaVersion>X0202</schemaVersion>
+  <headerData><submissionType>{form}</submissionType></headerData>
+  <formData>
+    <coverPageHeader><securitiesClassTitle>Common Stock</securitiesClassTitle>
+      <eventDateRequiresFilingThisStatement>{event}</eventDateRequiresFilingThisStatement>
+      <issuerInfo><issuerCik>{issuer_cik:010d}</issuerCik><issuerName>TEST CORP</issuerName></issuerInfo>
+    </coverPageHeader>
+    {people}
+  </formData>
+</edgarSubmission>"""
+
+
+def test_schedule13_rows_per_reporting_person():
+    from pipeline.providers.sec_edgar import parse_schedule13
+    rows = parse_schedule13(schedule13(persons=(("FUND A", "600.00", "5.1", "IA"),
+                                                ("FUND A PARENT", "600.00", "5.1", "HC"))), "acc")
+    assert [r["holder"] for r in rows] == ["FUND A", "FUND A PARENT"]
+    assert rows[0] == {"accession": "acc", "form": "SCHEDULE 13G", "issuer_cik": CIK,
+                       "issuer_name": "TEST CORP", "holder": "FUND A", "holder_type": "IA",
+                       "event_date": "2026-07-13", "shares": 600.0, "percent": 5.1}
+
+
+def test_schedule13_with_a_namespace_is_read_the_same():
+    from pipeline.providers.sec_edgar import parse_schedule13
+    xml = schedule13().replace("<edgarSubmission>",
+                               '<edgarSubmission xmlns="http://www.sec.gov/edgar/schedule13g">')
+    assert parse_schedule13(xml, "acc")[0]["percent"] == 7.5
+
+
+@pytest.mark.parametrize("xml,match", [
+    (schedule13(event="2026-07-13"), "MM/DD/YYYY"),
+    (schedule13(persons=(("", "1", "1", "IA"),)), "without a name"),
+    (schedule13(persons=(("F", "", "1", "IA"),)), "missing reportingPersonBeneficially"),
+    (schedule13(persons=()), "no reporting persons"),
+    ("<other/>", "expected <edgarSubmission>"),
+])
+def test_unreadable_schedule13_fails_loudly(xml, match):
+    from pipeline.providers.sec_edgar import parse_schedule13
+    with pytest.raises(ProviderError, match=match):
+        parse_schedule13(xml, "acc")
+
+
+def test_plan_evidence_reports_the_checkbox_and_plan_footnotes():
+    from pipeline.providers.sec_edgar import plan_evidence
+    xml = form4(txn(), plan="0", footnotes=(
+        '<footnote id="F1">Weighted average price.</footnote>'
+        '<footnote id="F2">Effected pursuant to a Rule 10b5-1 trading plan adopted on March 1.</footnote>'))
+    ev = plan_evidence(xml)
+    assert ev["aff10b5One"] == "'0'" and list(ev["plan_footnotes"]) == ["F2"]
+    assert ev["footnote_count"] == 2
+    assert plan_evidence(form4(txn()))["aff10b5One"] == "absent"

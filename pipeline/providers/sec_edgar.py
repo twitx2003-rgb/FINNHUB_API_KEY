@@ -266,3 +266,85 @@ def summarize(rows: list[dict]) -> dict:
         "open_market_rows_without_price": sum(1 for r in rows
                                               if r["code"] in ("P", "S") and r["price"] is None),
     }
+
+
+# ---------------------------------------------------------- Schedule 13G/D
+# The structured XML filed since Dec 2024 (shape verified live on 2026-09-23):
+#   edgarSubmission/headerData/submissionType
+#   edgarSubmission/formData/coverPageHeader/issuerInfo/issuerCik, issuerName
+#   edgarSubmission/formData/coverPageHeader/eventDateRequiresFilingThisStatement (MM/DD/YYYY)
+#   edgarSubmission/formData/coverPageHeaderReportingPersonDetails (one per person):
+#       reportingPersonName, reportingPersonBeneficiallyOwnedAggregateNumberOfShares,
+#       classPercent, typeOfReportingPerson
+# A company's own submissions list both kinds: holders of ITS stock, and stakes
+# IT holds in others (NVIDIA's list had its 9.3% of Nebius) — the issuer CIK tells.
+HOLDER_FORMS = {"SCHEDULE 13G", "SCHEDULE 13G/A", "SCHEDULE 13D", "SCHEDULE 13D/A",
+                "SC 13G", "SC 13G/A", "SC 13D", "SC 13D/A"}
+
+
+def parse_schedule13(xml_text: str, accession: str) -> list[dict]:
+    """One row per reporting person of a structured Schedule 13G/13D."""
+    from lxml import etree
+
+    context = f"Schedule 13 {accession}"
+    try:
+        root = etree.fromstring(xml_text.encode("utf-8"))
+    except etree.XMLSyntaxError as exc:
+        raise ProviderError(f"{context}: not valid XML ({exc})") from exc
+    # The live document carries a default namespace on some filings; match by local name.
+    for el in root.iter():
+        if isinstance(el.tag, str) and "}" in el.tag:
+            el.tag = el.tag.split("}", 1)[1]
+    if root.tag != "edgarSubmission":
+        raise ProviderError(f"{context}: root is <{root.tag}>, expected <edgarSubmission>")
+
+    form = _text(root, "headerData/submissionType") or "?"
+    cover = root.find("formData/coverPageHeader")
+    if cover is None:
+        raise ProviderError(f"{context}: no formData/coverPageHeader")
+    issuer_cik = _text(cover, "issuerInfo/issuerCik")
+    if issuer_cik is None:
+        raise ProviderError(f"{context}: no issuerInfo/issuerCik")
+    event = _text(cover, "eventDateRequiresFilingThisStatement")
+    try:
+        event_iso = date(int(event[6:10]), int(event[0:2]), int(event[3:5])).isoformat() if event else None
+    except ValueError:
+        raise ProviderError(f"{context}: event date not MM/DD/YYYY: {event!r}") from None
+
+    rows = []
+    for person in root.findall("formData/coverPageHeaderReportingPersonDetails"):
+        name = _text(person, "reportingPersonName")
+        if not name:
+            raise ProviderError(f"{context}: reporting person without a name")
+        rows.append({
+            "accession": accession,
+            "form": form,
+            "issuer_cik": int(issuer_cik),
+            "issuer_name": _text(cover, "issuerInfo/issuerName") or "?",
+            "holder": name,
+            "holder_type": _text(person, "typeOfReportingPerson") or "?",
+            "event_date": event_iso,
+            "shares": _number(person, "reportingPersonBeneficiallyOwnedAggregateNumberOfShares",
+                              context, required=True),
+            "percent": _number(person, "classPercent", context, required=True),
+        })
+    if not rows:
+        raise ProviderError(f"{context}: no reporting persons")
+    return rows
+
+
+def plan_evidence(xml_text: str) -> dict:
+    """How a Form 4 marks 10b5-1 plans, for --discover-sec: the checkbox as filed,
+    and any footnote or remark that mentions a plan."""
+    from lxml import etree
+
+    root = etree.fromstring(xml_text.encode("utf-8"))
+    box = root.find("aff10b5One")
+    notes = {f.get("id"): " ".join(" ".join(f.itertext()).split())
+             for f in root.findall("footnotes/footnote")}
+    return {
+        "aff10b5One": "absent" if box is None else repr(box.text),
+        "plan_footnotes": {k: v[:160] for k, v in notes.items() if "10b5" in v},
+        "remarks": " ".join(" ".join(root.findtext("remarks") or "").split())[:160] or None,
+        "footnote_count": len(notes),
+    }

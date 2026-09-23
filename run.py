@@ -269,40 +269,34 @@ def discover_sec(settings, ticker: str) -> int:
         print("     " + ", ".join(f"{k}={row[k]}" for k in
                                    ("insider", "role", "date", "code", "direction", "shares", "price",
                                     "plan_10b5_1")))
-    _show_newest_13g(client, cik, year)
+    from pipeline.providers.sec_edgar import plan_evidence
+    sale = next((f for f in form4 if any(r["code"] == "S" for r in parse_form4(
+        client.fetch(archive_url(cik, f), cache=True), f.accession, expected_cik=cik))), None)
+    if sale:
+        evidence = plan_evidence(client.fetch(archive_url(cik, sale), cache=True))
+        print(f"\n   10b5-1 marking in the newest Form 4 with a sale ({sale.accession}):")
+        for key, value in evidence.items():
+            print(f"     {key}: {value}")
+    _show_holders(client, cik, year)
     print()
     return 0
 
 
-def _show_newest_13g(client, cik: int, filings) -> None:
-    """Print every leaf field of the newest Schedule 13G, to map it without guessing."""
-    from lxml import etree
+def _show_holders(client, cik: int, filings) -> None:
+    """Which Schedule 13G/13D filings in the list are about this company's stock."""
+    from pipeline.providers.sec_edgar import ARCHIVE_URL, HOLDER_FORMS, parse_schedule13
 
-    from pipeline.providers.sec_edgar import ARCHIVE_URL
-
-    g = [f for f in filings if f.form.upper().replace("SC ", "SCHEDULE ").startswith("SCHEDULE 13G")]
-    if not g:
-        print("\n   no Schedule 13G in the last year")
-        return
-    newest = g[0]
-    name = newest.primary_document.rsplit("/", 1)[-1]
-    url = ARCHIVE_URL.format(cik=cik, folder=newest.accession.replace("-", ""), name=name)
-    print(f"\n   newest {newest.form}: {newest.accession} filed {newest.filed}, "
-          f"primaryDocument '{newest.primary_document}'\n   raw: {url}")
-    if not name.lower().endswith(".xml"):
-        print("   (not XML — an older text/HTML filing)")
-        return
-    root = etree.fromstring(client.fetch(url, cache=True).encode("utf-8"))
-    shown = 0
-    for el in root.iter():
-        if not isinstance(el.tag, str) or len(el) or not (el.text or "").strip():
+    print("\n   Schedule 13G/13D filings in the last year:")
+    for f in [f for f in filings if f.form.upper() in HOLDER_FORMS]:
+        name = f.primary_document.rsplit("/", 1)[-1]
+        if not name.lower().endswith(".xml"):
+            print(f"     {f.filed} {f.form}: not XML ({f.primary_document})")
             continue
-        path = "/".join(etree.QName(a).localname for a in reversed(list(el.iterancestors())))
-        print(f"     {path}/{etree.QName(el).localname} = {el.text.strip()[:70]}")
-        shown += 1
-        if shown >= 80:
-            print("     ... (first 80 fields)")
-            break
+        url = ARCHIVE_URL.format(cik=cik, folder=f.accession.replace("-", ""), name=name)
+        for row in parse_schedule13(client.fetch(url, cache=True), f.accession):
+            about = "holder OF this stock" if row["issuer_cik"] == cik else "this company's stake in"
+            print(f"     {f.filed} {f.form}: {row['holder']} — {about} {row['issuer_name']}: "
+                  f"{row['shares']:,.0f} shares, {row['percent']}%")
 
 
 def docs_spike(settings, dtype: str) -> int:
