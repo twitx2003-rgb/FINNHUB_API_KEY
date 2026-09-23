@@ -160,7 +160,7 @@ writing code against it. Do not trust README summaries or memory.
   `fetch_or_saved` falls back ONLY on `RateLimited`, and only to an answer younger than
   `saved_market_cap_max_age_days` (7) / `saved_earnings_max_age_days` (3). The check
   records `theirs_saved_at` and says so in its detail. Close is always live.
-  `run.py --seed-saved-answers TICKER` turns the success payloads in
+  `run.py --seed-saved-answers TICKER` (since removed, used once) turned the success payloads in
   `logs/tradingview_payloads/` into saved answers dated by file mtime (one-off bootstrap).
 - **Phase 3 (forecast, TimesFM): BUILT; model verified on the user's machine** —
   `--check-timesfm` continued a known wave with mean error 0.03 (amplitude 10);

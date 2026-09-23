@@ -17,7 +17,7 @@ data:
 
   # LSE's own daily bar covers 04:00-20:00 New York: its close is the last
   # after-hours trade and its volume includes pre-market and after-hours
-  # (checked with run.py --discover-session). "regular" rebuilds each day from
+  # (verified live 2026-09-22 against 5-minute candles). "regular" rebuilds each day from
   # 30-minute candles, 09:30-16:00 (13:00 on half-days) — the definition
   # TradingView and most sources use. "extended" keeps LSE's bar.
   daily_session: regular
