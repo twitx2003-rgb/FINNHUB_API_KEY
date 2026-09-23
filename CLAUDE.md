@@ -81,6 +81,30 @@ Exit codes: 0 ok, 1 stage failed, 2 bad args, 3 validation HALT.
 Rule for every new library: install it and **introspect the real signatures** before
 writing code against it. Do not trust README summaries or memory.
 
+## Start here (handoff to a local session, 2026-09-23)
+
+The work moves from a cloud session (which could not reach the user's machine, LSE,
+SEC, TradingView or Hugging Face) to Claude Code running locally in
+`C:\dev\market-research-pipeline`. A local session CAN run every command itself —
+the user explicitly wants that: run commands yourself, don't hand them instructions.
+Talk to the user in Hebrew. Windows + PowerShell; use `.venv\Scripts\python.exe`.
+
+Where things stand:
+- Phases 1-3 done and approved. Phase 4 in progress.
+- Extract (SEC): insider Form 4 + >5% holders built. Next: run
+  `.venv\Scripts\python.exe run.py --ticker NVDA --stages extract --run-date 2026-09-22`
+  and check the `holder ...` lines and `extract_holders.json` look right.
+- Docs spike: the page-screenshot model works (right page on both check questions) but
+  embeds at ~203 s/page on this CPU (float32). **User decision: no text-based retrieval.**
+  So the spike must run on a small corpus (e.g. 5 PDFs x ~10 pages ~= 3 h) or overnight;
+  page vectors are cached, so a rerun only embeds new pages. Needs the user's PDFs in
+  `docs_input\` and `docs_input\questions.yaml` (see `examples\`).
+- After phase 4 review: phase 5 — Kronos (CPU) + TradingAgents debate (needs
+  `ANTHROPIC_API_KEY`, costs money per run) + the Hebrew report. The approved report look
+  is the mockup at https://claude.ai/artifact/V3PtwYbCSWBrmmcoe6GoX8 (sample data only).
+- Run `.venv\Scripts\python.exe -m pytest -q` before every push; the repo is public —
+  never commit vendor data, `.env`, `cache\`, `logs\` or `docs_input\`.
+
 ## Status
 
 - **Phase 1 (data stage): ACCEPTED 2026-09-22.** On the user's Windows machine, LSE's
