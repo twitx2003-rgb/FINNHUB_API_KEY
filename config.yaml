@@ -115,6 +115,14 @@ forecast:
   backtest_windows: 60               # rolling origins, most recent history
   backtest_horizon: 5                # sessions ahead in each backtest window
 
+extract:
+  # Insider transactions (SEC Form 4) from SEC EDGAR's official API. Needs
+  # SEC_USER_AGENT in .env ("Your Name your@email"): SEC requires every request
+  # to say who is asking. At most 10 requests/second; filed documents are cached.
+  sec_enabled: true
+  sec_lookback_days: 180
+  sec_max_filings: 150
+
 # Stages that need their own interpreter (phase 4: PixelRAG needs an isolated
 # venv). Empty means "use the current interpreter".
 venvs: {}

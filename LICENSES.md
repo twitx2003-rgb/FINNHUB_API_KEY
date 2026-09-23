@@ -18,6 +18,7 @@ Verified 2026-09-22 against PyPI/repository metadata.
 | **PixelRAG** 0.4.0 | Apache-2.0 | Model weights are third-party — see below | Requires Python ≥3.12. |
 | **TimesFM** 3.0.2 | Apache-2.0 (code) | **`timesfm-non-commercial-license-v1.0`** for 3.0 weights (`google/timesfm-3.0-pytorch`, per the package README) | "Non-commercial, non-production" only. Fine for this project. TimesFM ≤2.5 weights are Apache-2.0 if you ever need commercial use (`forecast.timesfm_checkpoint`). |
 | **PyTorch** | BSD-3-Clause | n/a | Pulled in by `timesfm[torch]`; CPU build on Windows. |
+| **SEC EDGAR** | n/a (US government) | Public domain | Fair-access policy: declare who you are in the User-Agent (`SEC_USER_AGENT`), at most 10 requests/second. |
 | **PyMuPDF** 1.2x | **AGPL-3.0** (or Artifex commercial) | n/a | Renders PDF pages. AGPL obligations apply if you distribute or offer this software over a network; personal local use is fine. |
 | **Qwen3-VL-Embedding-2B** | n/a | Model card licence — **confirm on first download** (Hugging Face is blocked from the build machine) | Page/question embeddings for the phase-4 spike. |
 | **Kronos** | MIT | Weights on Hugging Face (`NeoQuasar/Kronos-*`) | Authors state the reference pipeline is "a simplified example and not a production-ready quantitative trading system". |

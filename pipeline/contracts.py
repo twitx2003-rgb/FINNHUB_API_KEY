@@ -129,6 +129,16 @@ FORECAST = Contract(
 )
 
 
+INSIDER = Contract(
+    name="extract_insider",
+    columns={"accession": STRING, "insider": STRING, "role": STRING, "date": STRING,
+             "code": STRING, "direction": STRING, "shares": NUMERIC, "price": NUMERIC,
+             "shares_after": NUMERIC, "plan_10b5_1": ANY},
+    required_non_null=("accession", "insider", "date", "code", "direction", "shares"),
+    allow_empty=True,                 # a quiet half-year has no Form 4s
+)
+
+
 def assert_ohlcv_sane(df: pd.DataFrame) -> pd.DataFrame:
     """Bar-level invariants. Cheap here, and they catch provider bugs early.
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from .base import NotImplementedStage, Stage
 from .data import DataStage
+from .extract import ExtractStage
 from .forecast import ForecastStage
 from .validate import ValidateStage
 
@@ -16,7 +17,6 @@ STAGE_ORDER: tuple[str, ...] = (
 )
 
 _PLACEHOLDERS = {
-    "extract": "phase 4",
     "docs": "phase 4",
     "debate": "phase 5",
     "report": "phase 5",
@@ -25,7 +25,7 @@ _PLACEHOLDERS = {
 
 def build_registry() -> dict[str, Stage]:
     registry: dict[str, Stage] = {"data": DataStage(), "validate": ValidateStage(),
-                                  "forecast": ForecastStage()}
+                                  "forecast": ForecastStage(), "extract": ExtractStage()}
     for name, phase in _PLACEHOLDERS.items():
         registry[name] = NotImplementedStage(name, phase)
     return registry

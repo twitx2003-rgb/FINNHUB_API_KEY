@@ -122,6 +122,18 @@ class ForecastSettings:
 
 
 @dataclass(frozen=True)
+class ExtractSettings:
+    # SEC EDGAR Form 4 (insider transactions). Needs SEC_USER_AGENT in .env.
+    sec_enabled: bool = True
+    sec_lookback_days: int = 180
+    sec_max_filings: int = 150        # newest first; archive files are cached forever
+
+    def __post_init__(self):
+        if self.sec_lookback_days < 1 or self.sec_max_filings < 1:
+            raise ConfigError("extract.sec_lookback_days and sec_max_filings must be >= 1")
+
+
+@dataclass(frozen=True)
 class Settings:
     root: Path
     cache_dir: Path
@@ -129,6 +141,7 @@ class Settings:
     data: DataSettings
     validate: ValidateSettings
     forecast: ForecastSettings = field(default_factory=ForecastSettings)
+    extract: ExtractSettings = field(default_factory=ExtractSettings)
     venvs: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -163,13 +176,16 @@ def load_settings(config_path: Path | None = None, root: Path = ROOT) -> Setting
     known_data = {f.name for f in DataSettings.__dataclass_fields__.values()}
     known_validate = {f.name for f in ValidateSettings.__dataclass_fields__.values()}
     known_forecast = {f.name for f in ForecastSettings.__dataclass_fields__.values()}
+    known_extract = {f.name for f in ExtractSettings.__dataclass_fields__.values()}
 
     data_raw = _section(raw, "data")
     validate_raw = _section(raw, "validate")
     forecast_raw = _section(raw, "forecast")
+    extract_raw = _section(raw, "extract")
     # Typos in config are silent bugs otherwise — surface them immediately.
     for name, given, known in (("data", data_raw, known_data), ("validate", validate_raw, known_validate),
-                               ("forecast", forecast_raw, known_forecast)):
+                               ("forecast", forecast_raw, known_forecast),
+                               ("extract", extract_raw, known_extract)):
         unknown = set(given) - known
         if unknown:
             raise ConfigError(f"config.yaml: unknown key(s) under '{name}': {sorted(unknown)}")
@@ -181,6 +197,7 @@ def load_settings(config_path: Path | None = None, root: Path = ROOT) -> Setting
         data=DataSettings(**data_raw),
         validate=ValidateSettings(**validate_raw),
         forecast=ForecastSettings(**forecast_raw),
+        extract=ExtractSettings(**extract_raw),
         venvs=_section(raw, "venvs"),
         raw=raw,
     )

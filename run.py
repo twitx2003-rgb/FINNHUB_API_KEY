@@ -66,6 +66,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--docs-dtype", default="bfloat16", choices=["bfloat16", "float32"],
                         help="Number format for the embedding model on CPU (bfloat16 needs "
                              "about half the memory)")
+    parser.add_argument("--discover-sec", metavar="TICKER",
+                        help="Show what SEC EDGAR returns for a ticker: CIK, recent form types, "
+                             "and the first Form 4 parsed")
     parser.add_argument("--check-docs-model", action="store_true",
                         help="Load the page-embedding model (downloads on first use), embed two "
                              "generated pages and check a question finds the right one")
@@ -273,6 +276,40 @@ def tradingview_call(settings, spec: list[str]) -> int:
             pass
         break
     print(describe_result(result))
+    print()
+    return 0
+
+
+def discover_sec(settings, ticker: str) -> int:
+    """Look at SEC's live answers before trusting the Form 4 mapping."""
+    from collections import Counter
+    from datetime import date, timedelta
+
+    from pipeline.providers.sec_edgar import (
+        SUBMISSIONS_URL, TICKERS_URL, SecClient, archive_url, cik_for, parse_form4, recent_filings)
+
+    client = SecClient(settings.env("SEC_USER_AGENT"), settings.cache_dir / "sec")
+    cik = cik_for(client.json(TICKERS_URL), ticker)
+    submissions = client.json(SUBMISSIONS_URL.format(cik=cik))
+    print(f"\n== SEC EDGAR: {ticker} -> CIK {cik} ({submissions.get('name', '?')})")
+    recent = submissions.get("filings", {}).get("recent", {})
+    print(f"   filings.recent columns: {sorted(recent)}")
+    year = recent_filings(submissions, set(recent.get("form", [])), date.today() - timedelta(days=365))
+    print("\n   form types filed in the last 365 days:")
+    for form, count in Counter(f.form for f in year).most_common(20):
+        print(f"     {form:<12} {count}")
+    form4 = [f for f in year if f.form == "4"]
+    if not form4:
+        print("\n   no Form 4 in the last year\n")
+        return 0
+    first = form4[0]
+    url = archive_url(cik, first)
+    print(f"\n   newest Form 4: {first.accession} filed {first.filed}, "
+          f"primaryDocument '{first.primary_document}'\n   raw XML: {url}")
+    for row in parse_form4(client.fetch(url, cache=True), first.accession, expected_cik=cik)[:5]:
+        print("     " + ", ".join(f"{k}={row[k]}" for k in
+                                   ("insider", "role", "date", "code", "direction", "shares", "price",
+                                    "plan_10b5_1")))
     print()
     return 0
 
@@ -495,6 +532,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selftest:
         return selftest(settings)
+
+    if args.discover_sec:
+        try:
+            return discover_sec(settings, args.discover_sec.strip().upper())
+        except PipelineError as exc:
+            log.error("%s", exc)
+            return 1
 
     if args.check_docs_model:
         try:

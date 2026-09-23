@@ -41,6 +41,7 @@ before the next one starts.
 .venv\Scripts\python.exe run.py --seed-saved-answers NVDA   # bootstrap saved TradingView answers
 .venv\Scripts\python.exe run.py --check-docs-model          # load the page-embedding model, 2-page sanity check
 .venv\Scripts\python.exe run.py --docs-spike                # recall@5 on docs_input\*.pdf + questions.yaml
+.venv\Scripts\python.exe run.py --discover-sec NVDA         # SEC EDGAR: CIK, form types, newest Form 4
 ```
 
 Exit codes: 0 ok, 1 stage failed, 2 bad args, 3 validation HALT.
@@ -129,7 +130,25 @@ writing code against it. Do not trust README summaries or memory.
   `examples/questions.example.yaml`. Decision rule unchanged (plan §2.3): good recall ->
   keep; poor -> ColQwen2.5-multilingual. Not verified here: the real model (HF
   blocked in this container); Qwen3-VL-Embedding-2B licence to confirm on its card.
-  Open: what Scrapling should extract (which sites/fields) — asked the user.
+  - First live `--check-docs-model` failed: Qwen3-VL's video processor needs
+    `torchvision` (added to requirements). Re-run pending.
+  - **Extract target — user decision: insider + institutional transactions (SEC EDGAR).**
+    Built: insider Form 4 via SEC's official API (`pipeline/providers/sec_edgar.py`,
+    `pipeline/stages/extract.py`), NOT Scrapling: SEC requires a declared User-Agent with a
+    contact (`SEC_USER_AGENT` in .env) and <= 10 req/s, while Scrapling impersonates a
+    browser. Scrapling stays reserved for sites without an API. SEC is blocked from this
+    container too, so formats come from SEC's documentation and are parsed strictly:
+    company_tickers.json -> CIK; data.sec.gov submissions `filings.recent` (column arrays,
+    equal lengths checked); raw Form 4 XML = primaryDocument minus the `xslF345X05/`
+    view folder; `ownershipDocument` non-derivative rows (code, A/D, shares, price may be
+    null -> kept unknown, shares after, 10b5-1 from `aff10b5One` or a referenced footnote);
+    issuer CIK must match. Any unreadable filing fails the stage. 4/A amendments are
+    counted, not read. Artifacts `extract_insider.parquet` (contract INSIDER, may be
+    empty) + `.json` summary (open-market buys vs sales, $, % of sold shares under 10b5-1).
+    `run.py --discover-sec TICKER` shows the live CIK, form-type counts and the newest
+    Form 4 parsed. **Institutional holdings not built yet:** 13F is filed by the
+    institutions (needs SEC's quarterly bulk 13F data sets); whether SC 13G/13D (>5%
+    holders) show up in the company's own submissions is what `--discover-sec` will show.
 - **TradingView scanner 429 is chronic** (hours at a time; blocked phase-3 runs twice).
   **User decision: keep last answers.** `validate.SavedAnswers` stores each successful
   market-cap / earnings answer per symbol in `cache/<TICKER>/tradingview_reference.json`;

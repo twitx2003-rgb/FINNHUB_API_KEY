@@ -18,8 +18,8 @@ output, so any stage can be rerun on its own.
 |---|---|---|
 | 1 | `data` | **done** — accepted against live data |
 | 2 | `validate` | **done** — close, market cap and earnings checked against TradingView |
-| 3 | `forecast` (TimesFM) | **done, awaiting review** — volume band beat the naive forecast in a 60-window backtest |
-| 4 | `docs`, `extract` | planned |
+| 3 | `forecast` (TimesFM) | **done** — volume band beat the naive forecast in a 60-window backtest |
+| 4 | `docs`, `extract` | **in progress** — Hebrew-PDF retrieval spike built; insider trades (SEC Form 4) built |
 | 5 | `forecast` (Kronos), `debate`, `report` | planned |
 
 Unbuilt stages are registered placeholders, so `--stages all` already runs the whole
