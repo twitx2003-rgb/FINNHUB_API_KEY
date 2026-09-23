@@ -335,3 +335,37 @@ def test_plan_evidence_reports_the_checkbox_and_plan_footnotes():
     assert ev["aff10b5One"] == "'0'" and list(ev["plan_footnotes"]) == ["F2"]
     assert ev["footnote_count"] == 2
     assert plan_evidence(form4(txn()))["aff10b5One"] == "absent"
+
+
+
+def test_latest_position_per_holder_exits_and_company_stakes():
+    from pipeline.providers.sec_edgar import latest_positions
+    rows = [
+        {"accession": "a1", "issuer_cik": CIK, "holder": "Big Group", "percent": 9.3, "shares": 9},
+        {"accession": "a2", "issuer_cik": CIK, "holder": "BIG GROUP", "percent": 0.0, "shares": 0},
+        {"accession": "a3", "issuer_cik": CIK, "holder": "Big Capital Mgmt", "percent": 7.3, "shares": 7},
+        {"accession": "a4", "issuer_cik": 999, "holder": "TEST CORP", "percent": 11.5, "shares": 4},
+    ]
+    filed = {"a1": "2026-01-30", "a2": "2026-03-26", "a3": "2026-04-28", "a4": "2026-01-26"}
+    got = latest_positions(rows, filed, CIK)
+    assert [h["holder"] for h in got["holders"]] == ["Big Capital Mgmt"]
+    assert [h["holder"] for h in got["exited_or_moved"]] == ["BIG GROUP"]
+    assert got["company_stakes"][0]["issuer_cik"] == 999 and got["company_stakes"][0]["filed"] == "2026-01-26"
+
+
+def test_extract_stage_writes_holders(ctx):
+    docs = sec_documents(form4(txn()))
+    subs = json.loads(docs["CIK0001234567.json"])
+    recent = subs["filings"]["recent"]
+    day = (date.today() - timedelta(days=30)).isoformat()
+    for acc, form, doc in (("0009-26-000001", "SCHEDULE 13G", "xslSCHEDULE_13G_X01/primary_doc.xml"),
+                           ("0009-22-000001", "SC 13G", "holder.txt")):
+        recent["accessionNumber"].append(acc); recent["form"].append(form)
+        recent["filingDate"].append(day); recent["primaryDocument"].append(doc)
+    docs["CIK0001234567.json"] = json.dumps(subs)
+    docs["/1234567/000926000001/primary_doc.xml"] = schedule13()
+    ExtractStage(lambda c: FakeSec(docs)).run(ctx)
+    holders = ctx.read_json("extract_holders")
+    assert [h["holder"] for h in holders["holders"]] == ["BIG FUND LP"]
+    assert holders["holders"][0]["percent"] == 7.5
+    assert [u["accession"] for u in holders["not_machine_readable"]] == ["0009-22-000001"]

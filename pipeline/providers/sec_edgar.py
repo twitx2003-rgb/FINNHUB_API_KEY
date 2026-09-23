@@ -348,3 +348,29 @@ def plan_evidence(xml_text: str) -> dict:
         "remarks": " ".join(" ".join(root.findtext("remarks") or "").split())[:160] or None,
         "footnote_count": len(notes),
     }
+
+
+def latest_positions(rows: list[dict], filed: dict[str, str], cik: int) -> dict:
+    """Split Schedule 13 rows into current holders of the company, holders whose
+    latest filing reports 0% (exited, or the position moved to another entity),
+    and the company's own stakes in other issuers. Latest filing per holder wins."""
+    def newest(selected: list[dict], key) -> dict:
+        best: dict = {}
+        for r in selected:
+            k = key(r)
+            if k not in best or (filed[r["accession"]], r["accession"]) > \
+                    (filed[best[k]["accession"]], best[k]["accession"]):
+                best[k] = r
+        return best
+
+    def with_date(r: dict) -> dict:
+        return {**r, "filed": filed[r["accession"]]}
+
+    holders = newest([r for r in rows if r["issuer_cik"] == cik], lambda r: r["holder"].upper())
+    stakes = newest([r for r in rows if r["issuer_cik"] != cik], lambda r: r["issuer_cik"])
+    current = sorted((with_date(r) for r in holders.values() if r["percent"] > 0),
+                     key=lambda r: -r["percent"])
+    exited = sorted((with_date(r) for r in holders.values() if r["percent"] <= 0),
+                    key=lambda r: r["holder"])
+    own = sorted((with_date(r) for r in stakes.values()), key=lambda r: -r["percent"])
+    return {"holders": current, "exited_or_moved": exited, "company_stakes": own}

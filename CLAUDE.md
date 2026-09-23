@@ -169,7 +169,15 @@ writing code against it. Do not trust README summaries or memory.
     29 sales, but only 1.1% of sold shares flagged 10b5-1 — suspiciously low. Not
     trusted yet: `--discover-sec` now prints `plan_evidence` (the `aff10b5One` element as
     filed, plan footnotes, remarks) for the newest Form 4 with a sale.
-  - Holders are not in the extract stage yet — waiting on that listing.
+  - **Third run settled both:** the newest sale's Form 4 filed `aff10b5One` = '0' with no
+    plan footnote — the detection reads what is filed, so the low 10b5-1 share is real, not
+    a bug. Holders OF NVDA do appear in NVDA's own list (Vanguard entities; one filed 0%
+    after the position moved to another Vanguard entity). Built: `latest_positions`
+    (latest filing per holder; 0% -> `exited_or_moved`; other issuers -> `company_stakes`),
+    extract stage writes `extract_holders.json` (3-year window,
+    `extract.sec_holders_lookback_days`); pre-2025 free-text 13G filings are listed as
+    `not_machine_readable`, never guessed. Holders under 5% file no Schedule 13, and 13F
+    (the full institutional picture) is still not read.
 - **SEC_USER_AGENT is asked for, not hand-edited:** the user struggled to add it to .env
   (typed the line into PowerShell). `Settings.env_or_ask` prompts at an interactive
   terminal, validates (must contain "@"), appends to .env (newline-safe) and sets it for

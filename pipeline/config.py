@@ -128,10 +128,12 @@ class ExtractSettings:
     sec_enabled: bool = True
     sec_lookback_days: int = 180
     sec_max_filings: int = 150        # newest first; archive files are cached forever
+    # Schedule 13G/13D (>5% holders). A holder may file only yearly, so look further back.
+    sec_holders_lookback_days: int = 1095
 
     def __post_init__(self):
-        if self.sec_lookback_days < 1 or self.sec_max_filings < 1:
-            raise ConfigError("extract.sec_lookback_days and sec_max_filings must be >= 1")
+        if min(self.sec_lookback_days, self.sec_max_filings, self.sec_holders_lookback_days) < 1:
+            raise ConfigError("extract.sec_* values must be >= 1")
 
 
 @dataclass(frozen=True)

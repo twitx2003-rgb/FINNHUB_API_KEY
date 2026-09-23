@@ -122,6 +122,8 @@ extract:
   sec_enabled: true
   sec_lookback_days: 180
   sec_max_filings: 150
+  # >5% holders (Schedule 13G/13D): latest filing per holder within this window.
+  sec_holders_lookback_days: 1095
 
 # Stages that need their own interpreter (phase 4: PixelRAG needs an isolated
 # venv). Empty means "use the current interpreter".
