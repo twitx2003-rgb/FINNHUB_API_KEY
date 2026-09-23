@@ -63,9 +63,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Phase 4 spike: measure whether page-screenshot retrieval finds the "
                              "right page in docs_input/*.pdf for the questions in "
                              "docs_input/questions.yaml (recall@5)")
-    parser.add_argument("--docs-dtype", default="bfloat16", choices=["bfloat16", "float32"],
-                        help="Number format for the embedding model on CPU (bfloat16 needs "
-                             "about half the memory)")
+    parser.add_argument("--docs-dtype", default="float32", choices=["float32", "bfloat16"],
+                        help="Number format for the embedding model on CPU. float32 (default) "
+                             "needs ~9 GB RAM and is fast on most CPUs; bfloat16 halves the "
+                             "memory but is emulated (much slower) on CPUs without native bf16")
     parser.add_argument("--discover-sec", metavar="TICKER",
                         help="Show what SEC EDGAR returns for a ticker: CIK, recent form types, "
                              "and the first Form 4 parsed")
@@ -345,6 +346,7 @@ def check_docs_model(settings, dtype: str) -> int:
     import tempfile
     from pathlib import Path as _Path
 
+    import numpy as np
     import pymupdf
 
     from pipeline.docs_spike import QwenVLEmbedder, render_pages
@@ -364,8 +366,15 @@ def check_docs_model(settings, dtype: str) -> int:
         started = time.monotonic()
         model = QwenVLEmbedder(dtype=dtype)
         loaded = time.monotonic() - started
+        print(f"\n  model loaded in {time.monotonic() - started:.0f}s; embedding 2 test pages "
+              "(the first can take a minute on CPU)...", flush=True)
         started = time.monotonic()
-        page_vecs = model.embed_pages(images)
+        vecs = []
+        for n, image in enumerate(images, 1):
+            page_started = time.monotonic()
+            vecs.append(model.embed_pages([image])[0])
+            print(f"  page {n}/2 done in {time.monotonic() - page_started:.1f}s", flush=True)
+        page_vecs = np.stack(vecs)
         per_page = (time.monotonic() - started) / len(images)
         queries = ["What is the management fee?", "How much did revenue grow?"]
         scores = model.embed_queries(queries) @ page_vecs.T

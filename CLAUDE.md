@@ -131,7 +131,10 @@ writing code against it. Do not trust README summaries or memory.
   keep; poor -> ColQwen2.5-multilingual. Not verified here: the real model (HF
   blocked in this container); Qwen3-VL-Embedding-2B licence to confirm on its card.
   - First live `--check-docs-model` failed: Qwen3-VL's video processor needs
-    `torchvision` (added to requirements). Re-run pending.
+    `torchvision` (added to requirements). Second run: weights downloaded (4.26 GB) and
+    loaded, but embedding the first page in bfloat16 on CPU was so slow the user
+    interrupted it (bf16 is emulated on most consumer CPUs). Default is now float32
+    (~9 GB RAM); per-page progress is printed. Re-run pending.
   - **Extract target — user decision: insider + institutional transactions (SEC EDGAR).**
     Built: insider Form 4 via SEC's official API (`pipeline/providers/sec_edgar.py`,
     `pipeline/stages/extract.py`), NOT Scrapling: SEC requires a declared User-Agent with a

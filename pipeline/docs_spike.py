@@ -119,7 +119,7 @@ class QwenVLEmbedder:
     """Qwen3-VL-Embedding through transformers, the way PixelRAG uses it."""
 
     def __init__(self, model_id: str = DEFAULT_MODEL, *, device: str = "cpu",
-                 dtype: str = "bfloat16", revision: str | None = None):
+                 dtype: str = "float32", revision: str | None = None):
         try:
             import torch
             from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
