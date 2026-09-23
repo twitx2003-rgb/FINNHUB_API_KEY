@@ -3,6 +3,7 @@
 # virtualenvs
 .venv/
 .venv-docs/
+.venv-agents/
 # pipeline outputs
 cache/
 logs/

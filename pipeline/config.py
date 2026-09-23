@@ -98,6 +98,24 @@ class ForecastSettings:
     interval: tuple[float, float] = (0.1, 0.9)
     backtest_windows: int = 60
     backtest_horizon: int = 5
+    # Kronos (phase 5): sampled candle paths, reported only as a scenario range
+    # of closes. "synthetic" = offline stand-in for --selftest and the tests.
+    kronos_enabled: bool = True
+    kronos_provider: str = "kronos"
+    kronos_model: str = "NeoQuasar/Kronos-small"
+    kronos_model_revision: str | None = None
+    kronos_tokenizer: str = "NeoQuasar/Kronos-Tokenizer-base"
+    kronos_tokenizer_revision: str | None = None
+    kronos_device: str = "cpu"
+    kronos_context: int = 512            # sessions of history; the model's limit is 512
+    kronos_paths: int = 30
+    kronos_temperature: float = 1.0
+    kronos_top_p: float = 0.9
+    kronos_batch_size: int = 32          # paths per model call (memory, not results)
+    kronos_seed: int = 7
+    kronos_max_invalid_pct: float = 20.0
+    kronos_backtest_windows: int = 10    # 0 = no backtest
+    kronos_backtest_paths: int = 20
 
     def __post_init__(self):
         object.__setattr__(self, "timesfm_series", tuple(self.timesfm_series))
@@ -105,6 +123,19 @@ class ForecastSettings:
         if self.timesfm_provider not in ("timesfm", "synthetic"):
             raise ConfigError(f"forecast.timesfm_provider must be 'timesfm' or 'synthetic', "
                               f"got '{self.timesfm_provider}'")
+        if self.kronos_provider not in ("kronos", "synthetic"):
+            raise ConfigError(f"forecast.kronos_provider must be 'kronos' or 'synthetic', "
+                              f"got '{self.kronos_provider}'")
+        if not 1 <= int(self.kronos_context) <= 512:
+            raise ConfigError("forecast.kronos_context must be 1..512 (Kronos' trained context)")
+        if int(self.kronos_paths) < 10 or int(self.kronos_backtest_paths) < 10:
+            raise ConfigError("forecast.kronos_paths / kronos_backtest_paths must be >= 10: "
+                              "a range needs many paths")
+        if not 0 <= float(self.kronos_max_invalid_pct) <= 100:
+            raise ConfigError("forecast.kronos_max_invalid_pct must be 0..100")
+        if int(self.kronos_backtest_windows) < 0 or int(self.kronos_batch_size) < 1:
+            raise ConfigError("forecast.kronos_backtest_windows must be >= 0 and "
+                              "kronos_batch_size >= 1")
         refused = set(self.timesfm_series) & NEVER_FORECAST
         if refused:
             raise ConfigError(f"forecast.timesfm_series: {sorted(refused)} refused — prices are "
@@ -137,6 +168,37 @@ class ExtractSettings:
 
 
 @dataclass(frozen=True)
+class DebateSettings:
+    # Phase 5: bull vs bear + a moderator, written by Claude from the validated
+    # brief only. "claude_code" = the local CLI on the user's subscription;
+    # "anthropic" = the paid API (ANTHROPIC_API_KEY); "synthetic" = tests/selftest.
+    enabled: bool = True
+    provider: str = "claude_code"
+    model: str = "sonnet"
+    effort: str = "high"                  # low | medium | high | xhigh | max
+    rounds: int = 2                       # 1 = openings only; 2 = + one rebuttal each
+    max_tokens: int = 16000               # per answer
+    max_cost_usd: float = 3.0             # stop before a call once the estimate reaches this
+    fallbacks: bool = True                # server-side fallback model on a refusal
+
+    def __post_init__(self):
+        if self.provider not in ("claude_code", "anthropic", "synthetic"):
+            raise ConfigError(f"debate.provider must be 'claude_code', 'anthropic' or 'synthetic', "
+                              f"got '{self.provider}'")
+        if self.effort not in ("low", "medium", "high", "xhigh", "max"):
+            raise ConfigError(f"debate.effort must be low/medium/high/xhigh/max, got '{self.effort}'")
+        if self.provider == "claude_code" and self.effort not in ("low", "medium", "high"):
+            raise ConfigError(f"debate.effort '{self.effort}': Claude Code offers low/medium/high only")
+        if self.provider == "anthropic" and not self.model.startswith("claude-"):
+            raise ConfigError(f"debate.model '{self.model}' is not an API model id "
+                              "(e.g. claude-opus-5, claude-sonnet-5)")
+        if not 1 <= int(self.rounds) <= 3:
+            raise ConfigError("debate.rounds must be 1..3")
+        if int(self.max_tokens) < 1000 or float(self.max_cost_usd) <= 0:
+            raise ConfigError("debate.max_tokens must be >= 1000 and max_cost_usd > 0")
+
+
+@dataclass(frozen=True)
 class Settings:
     root: Path
     cache_dir: Path
@@ -145,6 +207,7 @@ class Settings:
     validate: ValidateSettings
     forecast: ForecastSettings = field(default_factory=ForecastSettings)
     extract: ExtractSettings = field(default_factory=ExtractSettings)
+    debate: DebateSettings = field(default_factory=DebateSettings)
     venvs: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -158,18 +221,24 @@ class Settings:
         return value
 
     def env_or_ask(self, name: str, question: str, *, must_contain: str = "",
-                   ask=input, is_interactive=None) -> str:
+                   secret: bool = False, ask=None, is_interactive=None) -> str:
         """Like env(), but when the value is missing and a person is at the
-        terminal, ask for it once and save it to .env so it is not asked again."""
+        terminal, ask for it once and save it to .env so it is not asked again.
+
+        secret=True reads without echo (getpass) and never repeats the answer."""
         value = os.environ.get(name)
         if value:
             return value
         interactive = sys.stdin.isatty() if is_interactive is None else is_interactive
         if not interactive:
             raise ConfigError(f"{name} is not set in {self.root / '.env'}")
+        if ask is None:
+            import getpass
+            ask = getpass.getpass if secret else input
         answer = ask(f"\n{question}\n> ").strip()
         if not answer or (must_contain and must_contain not in answer):
-            raise ConfigError(f"{name}: '{answer}' is not valid — expected something containing "
+            shown = "the value typed" if secret else f"'{answer}'"
+            raise ConfigError(f"{name}: {shown} is not valid — expected something containing "
                               f"'{must_contain}'. Nothing was saved.")
         path = self.root / ".env"
         existing = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -203,15 +272,18 @@ def load_settings(config_path: Path | None = None, root: Path = ROOT) -> Setting
     known_validate = {f.name for f in ValidateSettings.__dataclass_fields__.values()}
     known_forecast = {f.name for f in ForecastSettings.__dataclass_fields__.values()}
     known_extract = {f.name for f in ExtractSettings.__dataclass_fields__.values()}
+    known_debate = {f.name for f in DebateSettings.__dataclass_fields__.values()}
 
     data_raw = _section(raw, "data")
     validate_raw = _section(raw, "validate")
     forecast_raw = _section(raw, "forecast")
     extract_raw = _section(raw, "extract")
+    debate_raw = _section(raw, "debate")
     # Typos in config are silent bugs otherwise — surface them immediately.
     for name, given, known in (("data", data_raw, known_data), ("validate", validate_raw, known_validate),
                                ("forecast", forecast_raw, known_forecast),
-                               ("extract", extract_raw, known_extract)):
+                               ("extract", extract_raw, known_extract),
+                               ("debate", debate_raw, known_debate)):
         unknown = set(given) - known
         if unknown:
             raise ConfigError(f"config.yaml: unknown key(s) under '{name}': {sorted(unknown)}")
@@ -224,6 +296,7 @@ def load_settings(config_path: Path | None = None, root: Path = ROOT) -> Setting
         validate=ValidateSettings(**validate_raw),
         forecast=ForecastSettings(**forecast_raw),
         extract=ExtractSettings(**extract_raw),
+        debate=DebateSettings(**debate_raw),
         venvs=_section(raw, "venvs"),
         raw=raw,
     )

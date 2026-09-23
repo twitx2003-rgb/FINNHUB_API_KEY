@@ -20,8 +20,10 @@ Verified 2026-09-22 against PyPI/repository metadata.
 | **SEC EDGAR** | n/a (US government) | Public domain | Fair-access policy: declare who you are in the User-Agent (`SEC_USER_AGENT`), at most 10 requests/second. |
 | **PyMuPDF** 1.2x | **AGPL-3.0** (or Artifex commercial) | n/a | Renders PDF pages. AGPL obligations apply if you distribute or offer this software over a network; personal local use is fine. |
 | **Qwen3-VL-Embedding-2B** | n/a | Model card licence — **confirm on first download** (Hugging Face is blocked from the build machine) | Page/question embeddings for the phase-4 spike. |
-| **Kronos** | MIT | Weights on Hugging Face (`NeoQuasar/Kronos-*`) | Authors state the reference pipeline is "a simplified example and not a production-ready quantitative trading system". |
-| **TradingAgents** 0.3.1 | Apache-2.0 | n/a | Research framework. Not investment advice. |
+| **Kronos** (code vendored in `pipeline/vendor/kronos`, commit 67b630e, LICENSE kept there) | MIT | **MIT** — `NeoQuasar/Kronos-small`, `-base`, `-mini`, `Kronos-Tokenizer-base`, `-2k` (model-card metadata, checked 2026-09-23) | Authors state the reference pipeline is "a simplified example and not a production-ready quantitative trading system". |
+| **TradingAgents** 0.7.0 | MIT | n/a | Evaluated, **not used** (2026-09-23): it fetches its own unvalidated data. The debate is our own code on the Anthropic SDK. |
+| **anthropic** (Python SDK) 1.8.0 | MIT | n/a | Client library for the debate stage's API option (`debate.provider: anthropic`). |
+| **Claude Code** CLI (default debate provider) | Anthropic terms | n/a | Runs on the user's claude.ai subscription for personal use; counts toward the plan's usage limits. |
 | **Anthropic API** | n/a | Anthropic Commercial Terms | Billed per token. Costs money on every debate run. |
 
 ## lse-data — the important one
@@ -45,7 +47,6 @@ licences are **unverified** and must be checked on first download:
 
 - `Qwen/Qwen3-VL-Embedding-2B` (PixelRAG base embedder)
 - `Chrisyichuan/wiki-screenshot-embedding-lora` (PixelRAG retrieval adapter)
-- `NeoQuasar/Kronos-small` / `Kronos-base` and their tokenizers
 
 ## Not financial advice
 

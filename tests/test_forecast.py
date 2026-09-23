@@ -28,6 +28,7 @@ from pipeline.forecasting import (
     forecast_series,
     quantile_index,
 )
+from pipeline.scenarios import SyntheticSampler
 from pipeline.session_check import is_trading_day, next_sessions, us_market_holidays
 from pipeline.stages import build_registry
 from pipeline.stages.forecast import ForecastStage
@@ -202,7 +203,7 @@ def test_forecast_stage_is_behind_the_validation_gate(ctx):
 
 def test_forecast_stage_writes_band_and_backtest(ctx):
     ctx.write_json("validation", {"status": "pass", "checks": []})
-    stage = ForecastStage(lambda c: SyntheticForecaster())
+    stage = ForecastStage(lambda c: SyntheticForecaster(), lambda c: SyntheticSampler())
     stage._gate(ctx)
     result = stage.run(ctx)
 
@@ -213,14 +214,17 @@ def test_forecast_stage_writes_band_and_backtest(ctx):
     report = ctx.read_json("forecast_timesfm")
     bt = report["series"]["volume"]["backtest"]
     assert report["model"] == "synthetic" and bt["windows"] == 60 and bt["coverage_target_pct"] == 80
-    assert "Kronos arrives in phase 5" in result.summary
+    assert result.artifacts == ["forecast_timesfm", "forecast_kronos"]
+    assert "Kronos scenario range" in result.summary
 
 
 def test_disabled_forecast_is_skipped(ctx):
     ctx.write_json("validation", {"status": "pass", "checks": []})
-    settings = dataclasses.replace(ctx.settings, forecast=ForecastSettings(timesfm_enabled=False))
+    settings = dataclasses.replace(ctx.settings, forecast=ForecastSettings(timesfm_enabled=False,
+                                                                           kronos_enabled=False))
     ctx.settings = settings
-    assert ForecastStage(lambda c: pytest.fail("model loaded")).run(ctx).status == "skipped"
+    stage = ForecastStage(lambda c: pytest.fail("model loaded"), lambda c: pytest.fail("model loaded"))
+    assert stage.run(ctx).status == "skipped"
 
 
 # ----------------------------------------------------------- TimesFM adapter

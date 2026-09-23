@@ -69,6 +69,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--check-timesfm", action="store_true",
                         help="Load the TimesFM model (downloads the weights on first use) and "
                              "forecast a known test series, to prove the install works")
+    parser.add_argument("--check-kronos", action="store_true",
+                        help="Load Kronos (downloads the weights on first use), sample price "
+                             "paths for a known test series and check the candles are sane")
     parser.add_argument("--selftest", action="store_true",
                         help="Run the pipeline against synthetic data (no API key, no network) "
                              "to verify the installation, then exit")
@@ -420,6 +423,62 @@ def check_timesfm(settings) -> int:
     return 0
 
 
+def check_kronos(settings) -> int:
+    """Load the real Kronos and sample paths for a series with a known shape."""
+    import numpy as np
+    import pandas as pd
+
+    from pipeline.scenarios import KronosSampler, summarize
+    from pipeline.session_check import next_sessions
+
+    f = settings.forecast
+    print(f"\nLoading {f.kronos_model} + {f.kronos_tokenizer} on {f.kronos_device}. The first run "
+          "downloads the weights; later runs load them from the local cache.\n")
+    started = time.monotonic()
+    sampler = KronosSampler(
+        f.kronos_model, model_revision=f.kronos_model_revision, tokenizer=f.kronos_tokenizer,
+        tokenizer_revision=f.kronos_tokenizer_revision, device=f.kronos_device,
+        max_context=f.kronos_context, temperature=f.kronos_temperature, top_p=f.kronos_top_p,
+        batch_size=f.kronos_batch_size, seed=f.kronos_seed)
+    loaded = time.monotonic() - started
+
+    # A steady weekly wave around 100 with well-formed candles: the model should
+    # stay near it and produce possible bars.
+    n, horizon = 400, 10
+    t = np.arange(n + horizon, dtype=float)
+    wave = 100 + 5 * np.sin(2 * np.pi * t / 5)
+    days = pd.bdate_range(end="2026-09-22", periods=n)
+    close = wave[:n]
+    open_ = np.concatenate([[close[0]], close[:-1]])
+    history = pd.DataFrame({"timestamp": days, "open": open_,
+                            "high": np.maximum(open_, close) + 0.5,
+                            "low": np.minimum(open_, close) - 0.5, "close": close,
+                            "volume": 1e6 + 1e5 * np.sin(2 * np.pi * t[:n] / 5)})
+    dates = next_sessions(days[-1].date(), horizon)
+    started = time.monotonic()
+    paths = sampler.sample([history], [dates], f.kronos_paths)[0]
+    took = time.monotonic() - started
+    s = summarize(paths, last_close=float(close[-1]), interval=f.interval,
+                  max_invalid_pct=f.kronos_max_invalid_pct, context="check")
+    truth = wave[n:]
+    held = np.mean([st["close_low"] <= v <= st["close_high"] for st, v in zip(s["steps"], truth)])
+
+    print(f"  model        {sampler.name}")
+    print(f"  load time    {loaded:.1f}s   sampling {f.kronos_paths} paths x {horizon}: {took:.1f}s")
+    print(f"  expected     {' '.join(f'{v:6.1f}' for v in truth)}")
+    print(f"  median       {' '.join(f'{st['close_median']:6.1f}' for st in s['steps'])}")
+    print(f"  range low    {' '.join(f'{st['close_low']:6.1f}' for st in s['steps'])}")
+    print(f"  range high   {' '.join(f'{st['close_high']:6.1f}' for st in s['steps'])}")
+    print(f"  invalid      {s['invalid_candles']} of {s['candles']} candles ({s['invalid_pct']}%) {s['invalid_by_rule']}")
+    print(f"  range held the known wave on {100 * held:.0f}% of steps\n")
+    if s["degraded"]:
+        print(f"  More than {f.kronos_max_invalid_pct}% of candles were impossible bars. "
+              "Send this output.\n")
+        return 1
+    print("  Kronos works. Next: python run.py --ticker NVDA --stages forecast --run-date <date>\n")
+    return 0
+
+
 def selftest(settings) -> int:
     """Prove the install works without a key or a network connection.
 
@@ -432,10 +491,11 @@ def selftest(settings) -> int:
     from pipeline.cache import make_run_context
     from pipeline.gate import require_validation_pass
     from pipeline.stages.data import DataStage, print_close_preview
+    from pipeline.stages.debate import DebateStage
     from pipeline.stages.forecast import ForecastStage
     from pipeline.stages.validate import ValidateStage
 
-    print("\nSelf-test: running the data, validate and forecast stages against synthetic "
+    print("\nSelf-test: running the data, validate, forecast and debate stages against synthetic "
           "data (no API key, no network, no model download).\n")
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -461,12 +521,19 @@ def selftest(settings) -> int:
         print(f"  ok  forecast: {len(ctx.read_parquet('forecast_timesfm'))} rows "
               f"({result.details['forecast']['model']} stand-in — it repeats the last value, so "
               "'did not beat the naive forecast' above is expected here)")
+        print(f"  ok  scenarios: {len(ctx.read_parquet('forecast_kronos'))} rows "
+              f"({result.details['scenarios']['model']} random-walk stand-in for Kronos)")
+        debate = DebateStage()
+        debate._gate(ctx)
+        result = debate.run(ctx)
+        print(f"  ok  debate: {len(ctx.read_json('debate_brief')['facts'])} brief facts, "
+              f"{result.summary.split(': ', 1)[1].split(';')[0]} (canned stand-in, no API call)")
         print_close_preview(ctx, rows=3)
 
     print("Self-test passed. The install is sound — pandas, pyarrow, Parquet IO,\n"
           "contracts, the ordering/freshness guards, the validation gate, the forecast\n"
-          "checks and the stage runner all work. To check the TimesFM model itself:\n"
-          "  python run.py --check-timesfm\n"
+          "checks and the stage runner all work. To check the models themselves:\n"
+          "  python run.py --check-timesfm   and   python run.py --check-kronos\n"
           "Add LSE_API_KEY to .env, then run:  python run.py --ticker NVDA --stages data\n")
     return 0
 
@@ -481,7 +548,9 @@ def replace_cache_dir(settings, cache_dir):
         data=dataclasses.replace(settings.data, provider="synthetic", fallback_provider=None,
                                  macro_fallback=None),
         validate=dataclasses.replace(settings.validate, provider="synthetic"),
-        forecast=dataclasses.replace(settings.forecast, timesfm_provider="synthetic"),
+        forecast=dataclasses.replace(settings.forecast, timesfm_provider="synthetic",
+                                     kronos_provider="synthetic"),
+        debate=dataclasses.replace(settings.debate, provider="synthetic"),
     )
 
 
@@ -512,6 +581,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.docs_spike:
         try:
             return docs_spike(settings, args.docs_dtype)
+        except PipelineError as exc:
+            log.error("%s", exc)
+            return 1
+
+    if args.check_kronos:
+        try:
+            return check_kronos(settings)
         except PipelineError as exc:
             log.error("%s", exc)
             return 1

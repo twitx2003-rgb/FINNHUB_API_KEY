@@ -22,6 +22,14 @@ mcp>=2.2,<3
 # timesfm 3.0.2 is pure Python, Requires-Python >=3.10). The 3.0 WEIGHTS are
 # non-commercial only — see LICENSES.md. They download on first use.
 timesfm[torch]==3.0.2
+# Phase 5 — Kronos price scenarios. Its model code is vendored in
+# pipeline/vendor/kronos (MIT; not a package — the PyPI "kronos" is an unrelated
+# Django app). Its own needs beyond torch/huggingface_hub/safetensors/tqdm,
+# which are already here: einops (pure Python).
+einops==0.8.1
+# Phase 5 — debate (Claude). 1.x line; the call shape was checked against 1.8.0's
+# signatures (beta.messages.create: fallbacks, output_config, thinking).
+anthropic==1.8.0
 
 # Stage 4 — docs (phase 4 spike). Pages are rendered with PyMuPDF (PixelRAG's own
 # renderer needs poppler, which has no official Windows build) and embedded with

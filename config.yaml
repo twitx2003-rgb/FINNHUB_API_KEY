@@ -115,6 +115,32 @@ forecast:
   backtest_windows: 60               # rolling origins, most recent history
   backtest_horizon: 5                # sessions ahead in each backtest window
 
+  # Phase 5: Kronos samples whole candles, one possible path at a time. The
+  # report shows only the spread of many paths' closes, labelled a SCENARIO
+  # RANGE — never one price, never "a prediction". Uses `horizon`, `interval`
+  # and `backtest_horizon` above. Weights are MIT (model cards, checked 2026-09-23).
+  kronos_enabled: true
+  kronos_provider: kronos            # "synthetic" only for --selftest
+  kronos_model: "NeoQuasar/Kronos-small"
+  # Hugging Face commits read from the hub API on 2026-09-23, pinned so the
+  # model cannot change under you between runs. null = latest.
+  kronos_model_revision: "901c26c1332695a2a8f243eb2f37243a37bea320"
+  kronos_tokenizer: "NeoQuasar/Kronos-Tokenizer-base"
+  kronos_tokenizer_revision: "0e0117387f39004a9016484a186a908917e22426"
+  kronos_device: cpu
+  kronos_context: 512                # sessions of history (the model's maximum)
+  kronos_paths: 30                   # sampled paths behind the range
+  kronos_temperature: 1.0
+  kronos_top_p: 0.9
+  kronos_batch_size: 32              # paths per model call: memory only, same results
+  kronos_seed: 7                     # same data + seed -> same range
+  # Generated candles that break a bar rule (high below the body, negative
+  # volume, ...) are dropped and counted. Above this share the range is flagged
+  # DEGRADED in the artifact and the report.
+  kronos_max_invalid_pct: 20
+  kronos_backtest_windows: 10        # rolling origins; 0 = skip the backtest
+  kronos_backtest_paths: 20
+
 extract:
   # Insider transactions (SEC Form 4) from SEC EDGAR's official API. Needs
   # SEC_USER_AGENT in .env ("Your Name your@email"): SEC requires every request
@@ -124,6 +150,32 @@ extract:
   sec_max_filings: 150
   # >5% holders (Schedule 13G/13D): latest filing per holder within this window.
   sec_holders_lookback_days: 1095
+
+debate:
+  # Phase 5: a bull analyst and a bear analyst argue from the validated brief
+  # only (debate_brief.json: every fact with its source), then a neutral
+  # moderator summarises. Written in Hebrew. No recommendation, no price target.
+  # User decision 2026-09-23: our own debate, not TradingAgents (0.7.0 fetches
+  # its own unvalidated data and cannot write Hebrew).
+  # provider (user decision 2026-09-23: claude_code):
+  #   claude_code — the local `claude` CLI on your claude.ai subscription: no
+  #     per-call charge, counts toward the plan's usage limits. Run from a normal
+  #     terminal (it will not start inside a Claude Code session). The CLI gets an
+  #     environment WITHOUT ANTHROPIC_API_KEY, or it would bill that key instead.
+  #     model: an alias (sonnet, opus) or a full name; effort: low | medium | high.
+  #   anthropic — the paid API: model claude-opus-5 / claude-sonnet-5, needs
+  #     ANTHROPIC_API_KEY (asked at the terminal the first time, input hidden);
+  #     effort also xhigh | max; max_tokens / max_cost_usd / fallbacks apply.
+  #   synthetic — offline stand-in for --selftest.
+  # 2 x rounds + 1 calls per run.
+  enabled: true
+  provider: claude_code
+  model: sonnet
+  effort: high
+  rounds: 2                          # 1 = openings only; 2 = + one rebuttal each
+  max_tokens: 16000                  # per answer (API provider)
+  max_cost_usd: 3.0                  # API provider: no new call once the estimate reaches this
+  fallbacks: true                    # API provider: server-side fallback model on a refusal
 
 # Stages that need their own interpreter (phase 4: PixelRAG needs an isolated
 # venv). Empty means "use the current interpreter".

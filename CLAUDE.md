@@ -25,7 +25,8 @@ before the next one starts.
 
 ```
 .venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m pytest -q                     # 79 offline tests (1 skips without IPv6)
+.venv\Scripts\python.exe -m pytest -q                     # 305 offline tests (1 skips without IPv6)
+.venv\Scripts\python.exe run.py --ticker NVDA --stages debate --run-date 2026-09-22   # normal terminal only
 .venv\Scripts\python.exe run.py --selftest                # install check, no key/network
 .venv\Scripts\python.exe run.py --ticker NVDA --stages data
 .venv\Scripts\python.exe run.py --ticker NVDA --stages all
@@ -37,6 +38,7 @@ before the next one starts.
 .venv\Scripts\python.exe run.py --tradingview-call TOOL key=value ...   # raw tool result
 .venv\Scripts\python.exe run.py --tradingview-token-status  # stored sign-in: expiry, refresh token (no secrets)
 .venv\Scripts\python.exe run.py --check-timesfm            # load TimesFM, forecast a known wave
+.venv\Scripts\python.exe run.py --check-kronos             # load Kronos, sample paths, count invalid candles
 .venv\Scripts\python.exe run.py --check-docs-model          # load the page-embedding model, 2-page sanity check
 .venv\Scripts\python.exe run.py --docs-spike                # recall@5 on docs_input\*.pdf + questions.yaml
 .venv\Scripts\python.exe run.py --discover-sec NVDA         # SEC EDGAR: CIK, form types, newest Form 4
@@ -90,10 +92,10 @@ the user explicitly wants that: run commands yourself, don't hand them instructi
 Talk to the user in Hebrew. Windows + PowerShell; use `.venv\Scripts\python.exe`.
 
 Where things stand:
-- Phases 1-3 done and approved. Phase 4 in progress.
-- Extract (SEC): insider Form 4 + >5% holders built. Next: run
-  `.venv\Scripts\python.exe run.py --ticker NVDA --stages extract --run-date 2026-09-22`
-  and check the `holder ...` lines and `extract_holders.json` look right.
+- Phases 1-3 done and approved. Phase 4 extract approved; docs spike skipped for now.
+- Phase 5 in progress: Kronos built and run; debate built (our own, not TradingAgents).
+  Next: the first live debate, run by the user from a normal terminal (Claude Code on
+  their Pro subscription — see Status), then the Hebrew report stage (mockup linked below).
 - Docs spike: the page-screenshot model works (right page on both check questions) but
   embeds at ~203 s/page on this CPU (float32). **User decision: no text-based retrieval.**
   So the spike must run on a small corpus (e.g. 5 PDFs x ~10 pages ~= 3 h) or overnight;
@@ -106,6 +108,78 @@ Where things stand:
   never commit vendor data, `.env`, `cache\`, `logs\` or `docs_input\`.
 
 ## Status
+
+- **Phase 4 extract: APPROVED by the user 2026-09-23** (holders + insider output looked
+  right). The docs spike is **skipped for now** (user decision) — no PDFs yet.
+- **Phase 5 started 2026-09-23 (local session).**
+  - **Kronos: BUILT and run live.** Code is vendored in `pipeline/vendor/kronos` (MIT,
+    upstream commit 67b630e; only the `model.module` import changed — upstream is not a
+    package, and PyPI `kronos` is an unrelated Django app). Weights MIT (model cards),
+    revisions pinned in config.yaml. Read from the source: `sample_count>1` AVERAGES
+    samples inside `auto_regressive_inference`, so each path is its own batch row with
+    `sample_count=1`; `predict_batch` needs equal history lengths; normalisation is
+    per-series mean/std over the context, clipped at ±5.
+    `pipeline/scenarios.py` (sampler, candle checks via `contracts.ohlcv_problem_masks`,
+    `summarize`, rolling backtest incl. signed median bias) + a second half in the
+    forecast stage -> `forecast_kronos.parquet` (contract SCENARIOS) / `.json`
+    (`kind: scenario_range`, invalid counts by rule, `degraded`, backtest, caveats that
+    the report must show). `--check-kronos`: loads in ~4 s, 30 paths x 10 sessions ~70-100 s
+    on the user's CPU; on a clean synthetic wave ~12% of candles broke a bar rule
+    (high/low vs body), on NVDA ~6%. First NVDA backtest (10 windows x 5, 20 paths): median
+    beat "no change" but the 80% range held only ~64% (too narrow); backtest median
+    bias small (~-0.6%), yet that run's own forward paths leaned clearly down — small
+    sample; the stage words narrowness/bias as caveats. Not tuned yet (candidates if the
+    user asks: shorter context, more paths, temperature).
+  - **TradingAgents 0.7.0 (MIT) installs on 3.14 in `.venv-agents`** only with
+    `--no-deps` + every listed dependency except `chainlit` (its latest caps Python
+    <3.14; nothing in the package imports it). `llm.py` imports every provider eagerly,
+    so all langchain provider packages are needed. **The plan's assumptions do not hold
+    in 0.7.0:** there is no `data_vendors` config key — tools (`ANALYST_TOOL_REGISTRY` in
+    `agents/utils/tool_registry.py`) call yfinance / Google News RSS directly; and
+    `response_language` has no Hebrew (zh-TW, zh-CN, en-US, ja-JP, ko-KR, de-DE).
+    Config is a pydantic `TradingAgentsConfig(llm_provider, deep_think_llm,
+    quick_think_llm, reasoning_effort, response_language, max_debate_rounds,
+    max_risk_discuss_rounds, max_recur_limit>=30, results_dir)`; graph is
+    `TradingAgentsGraph(config=..., selected_analysts=[...])`.
+    **User decision 2026-09-23: our own debate, not TradingAgents.** (`.venv-agents` is
+    gitignored and can be deleted.)
+  - **Debate runs on Claude Code, not the paid API (user decision 2026-09-23, "cheaper").**
+    `ClaudeCodeLLM` runs `claude -p --output-format json --json-schema ... --tools ""
+    --model sonnet --effort high --system-prompt <rules+brief> --no-session-persistence`
+    (flags from the CLI 2.1.71 --help; result schema read from its cli.js: `subtype`,
+    `is_error`, `structured_output`, `usage`, `modelUsage`, `total_cost_usd`). The user's
+    CLI is signed in to claude.ai **Pro**, BUT `ANTHROPIC_API_KEY` is set as a **user-level
+    Windows environment variable**, and with it present the CLI uses the key
+    (`claude auth status` -> `apiKeySource`) = API billing. So the child env drops
+    ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN. npm's `claude.cmd` shim goes through cmd.exe
+    (mangles JSON args), so cli.js is run with node directly. Runs in an empty temp dir (no
+    project CLAUDE.md). It refuses to start inside a Claude Code session (`CLAUDECODE=1`) —
+    never bypassed ("can crash all active sessions"), so **the live debate must be run by
+    the user from a normal terminal**; a Claude Code session cannot run it. Cost shown as
+    `api_equivalent_cost_usd` (not billed on the subscription). `provider: anthropic`
+    (`AnthropicLLM`) is kept as the paid option.
+  - **First live debate (2026-09-23, user's terminal): OK.** ~7 min for 5 calls; the
+    `sonnet` alias served claude-sonnet-4-6; 32 grounded arguments, 0 dropped; API-equivalent
+    ~$1.2 (not billed). Reviewed: all Hebrew, numbers match the brief, the Kronos range
+    always called a scenario range, unconfirmed earnings flagged, no recommendation. The
+    key-level grounding cannot catch outside knowledge attached to a valid key (e.g. "CPI
+    above the Fed's target"); the moderator's `claims_beyond_the_data` caught most such
+    claims (Vanguard as a passive indexer, "distribution zone", discount-rate reasoning) —
+    the report must show that list.
+  - **Debate: BUILT.**
+    `pipeline/brief.py` builds `debate_brief.json` from validated artifacts only: ~31
+    facts, each {value, unit, as_of, source, note}; `missing` lists absent artifacts; IV
+    in percent (not fraction) is refused; unconfirmed earnings carry a NOT CONFIRMED note.
+    `pipeline/debate.py`: bull + bear openings, `rounds`-1 rebuttal rounds, then a neutral
+    moderator — all Hebrew, JSON via structured outputs (`output_config.format`),
+    `thinking: adaptive`, `effort` from config, `fallbacks: "default"` (beta
+    `server-side-fallback-2026-07-01`), stop_reason checked before reading. `ground()`
+    drops arguments citing no fact or an unknown key (kept in `dropped_arguments`).
+    Rules + brief are the cached system prefix. Cost estimate per call; no new call once it
+    reaches `debate.max_cost_usd`. Key asked at the terminal with hidden input
+    (`env_or_ask(secret=True)`); with no terminal the stage fails before any call. Model
+    `claude-opus-5` (anthropic 1.8.0 signatures checked). The report must show the
+    moderator's `claims_beyond_the_data` and the caveat that this is not advice.
 
 - **Phase 1 (data stage): ACCEPTED 2026-09-22.** On the user's Windows machine, LSE's
   latest NVDA close matched the close the user knew to within a few cents. 59 offline

@@ -139,25 +139,35 @@ INSIDER = Contract(
 )
 
 
-def assert_ohlcv_sane(df: pd.DataFrame) -> pd.DataFrame:
-    """Bar-level invariants. Cheap here, and they catch provider bugs early.
+SCENARIOS = Contract(
+    name="forecast_kronos",
+    columns={"step": NUMERIC, "date": DATETIME, "close_low": NUMERIC, "close_median": NUMERIC,
+             "close_high": NUMERIC, "valid_paths": NUMERIC, "model": STRING},
+    required_non_null=("step", "date", "close_low", "close_median", "close_high", "valid_paths"),
+)
 
-    The same rules are reused in phase 5 to validate generated Kronos candles.
+
+def ohlcv_problem_masks(df: pd.DataFrame) -> dict[str, pd.Series]:
+    """Bar rules as one boolean mask per rule (True = the bar breaks it).
+
+    Shared by assert_ohlcv_sane (real bars: any break is an error) and the Kronos
+    scenario check (generated candles: breaking bars are dropped and counted).
     """
-    if df.empty:
-        return df
     body_high = df[["open", "close"]].max(axis=1)
     body_low = df[["open", "close"]].min(axis=1)
+    return {
+        "high < max(open, close)": df["high"] < body_high - 1e-6,
+        "low > min(open, close)": df["low"] > body_low + 1e-6,
+        "negative volume": df["volume"] < 0,
+        "non-positive price": (df[["open", "high", "low", "close"]] <= 0).any(axis=1),
+    }
 
-    problems = []
-    if (df["high"] < body_high - 1e-6).any():
-        problems.append("high < max(open, close)")
-    if (df["low"] > body_low + 1e-6).any():
-        problems.append("low > min(open, close)")
-    if (df["volume"] < 0).any():
-        problems.append("negative volume")
-    if (df[["open", "high", "low", "close"]] <= 0).any().any():
-        problems.append("non-positive price")
+
+def assert_ohlcv_sane(df: pd.DataFrame) -> pd.DataFrame:
+    """Bar-level invariants. Cheap here, and they catch provider bugs early."""
+    if df.empty:
+        return df
+    problems = [rule for rule, mask in ohlcv_problem_masks(df).items() if mask.any()]
     if problems:
         raise ContractError(f"data_ohlcv: impossible bars -> {'; '.join(problems)}")
     return df
