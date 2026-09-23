@@ -150,6 +150,14 @@ writing code against it. Do not trust README summaries or memory.
     Form 4 parsed. **Institutional holdings not built yet:** 13F is filed by the
     institutions (needs SEC's quarterly bulk 13F data sets); whether SC 13G/13D (>5%
     holders) show up in the company's own submissions is what `--discover-sec` will show.
+- **First live `--discover-sec NVDA` (2026-09-23): works.** CIK 1045810; `filings.recent`
+  columns incl. acceptanceDateTime, items, primaryDocDescription, reportDate, size.
+  Last 365 days: 90 Form 4, 52 Form 144 (proposed insider sales — a possible addition),
+  13F-HR x4 (NVIDIA's own portfolio, irrelevant), `SCHEDULE 13G` x2 and `SCHEDULE 13G/A`
+  x3 (new form names). Newest Form 4 parsed cleanly; its XSL folder was `xslF345X06`
+  (docs say X05) — `raw_xml_name` takes the basename, so any folder works.
+  `--discover-sec` now also prints every leaf field of the newest Schedule 13G so the
+  >5%-holder mapping can be written from the real shape.
 - **SEC_USER_AGENT is asked for, not hand-edited:** the user struggled to add it to .env
   (typed the line into PowerShell). `Settings.env_or_ask` prompts at an interactive
   terminal, validates (must contain "@"), appends to .env (newline-safe) and sets it for

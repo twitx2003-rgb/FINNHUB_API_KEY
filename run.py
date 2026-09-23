@@ -269,8 +269,40 @@ def discover_sec(settings, ticker: str) -> int:
         print("     " + ", ".join(f"{k}={row[k]}" for k in
                                    ("insider", "role", "date", "code", "direction", "shares", "price",
                                     "plan_10b5_1")))
+    _show_newest_13g(client, cik, year)
     print()
     return 0
+
+
+def _show_newest_13g(client, cik: int, filings) -> None:
+    """Print every leaf field of the newest Schedule 13G, to map it without guessing."""
+    from lxml import etree
+
+    from pipeline.providers.sec_edgar import ARCHIVE_URL
+
+    g = [f for f in filings if f.form.upper().replace("SC ", "SCHEDULE ").startswith("SCHEDULE 13G")]
+    if not g:
+        print("\n   no Schedule 13G in the last year")
+        return
+    newest = g[0]
+    name = newest.primary_document.rsplit("/", 1)[-1]
+    url = ARCHIVE_URL.format(cik=cik, folder=newest.accession.replace("-", ""), name=name)
+    print(f"\n   newest {newest.form}: {newest.accession} filed {newest.filed}, "
+          f"primaryDocument '{newest.primary_document}'\n   raw: {url}")
+    if not name.lower().endswith(".xml"):
+        print("   (not XML — an older text/HTML filing)")
+        return
+    root = etree.fromstring(client.fetch(url, cache=True).encode("utf-8"))
+    shown = 0
+    for el in root.iter():
+        if not isinstance(el.tag, str) or len(el) or not (el.text or "").strip():
+            continue
+        path = "/".join(etree.QName(a).localname for a in reversed(list(el.iterancestors())))
+        print(f"     {path}/{etree.QName(el).localname} = {el.text.strip()[:70]}")
+        shown += 1
+        if shown >= 80:
+            print("     ... (first 80 fields)")
+            break
 
 
 def docs_spike(settings, dtype: str) -> int:
