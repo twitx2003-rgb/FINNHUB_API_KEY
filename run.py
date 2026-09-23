@@ -49,30 +49,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tradingview-call", nargs="+", metavar=("TOOL", "KEY=VALUE"),
                         help="Call one TradingView tool and print the raw result, e.g. "
                              "--tradingview-call mcp-tv-get-ohlcv symbol=NASDAQ:NVDA count=5")
-    parser.add_argument("--discover-session", nargs=2, metavar=("SYMBOL", "DATE"),
-                        help="Rebuild one day from LSE 5-minute candles and show whether the "
-                             "daily bar is the regular session or includes extended hours")
     parser.add_argument("--tradingview-token-status", action="store_true",
                         help="Show whether a TradingView sign-in is stored, when it expires and "
                              "whether it can be renewed (prints no secrets)")
-    parser.add_argument("--seed-saved-answers", metavar="TICKER",
-                        help="One-off: save the TradingView answers already in "
-                             "logs/tradingview_payloads/ as the ticker's saved answers, dated by "
-                             "when each file was written")
-    parser.add_argument("--docs-spike", action="store_true",
-                        help="Phase 4 spike: measure whether page-screenshot retrieval finds the "
-                             "right page in docs_input/*.pdf for the questions in "
-                             "docs_input/questions.yaml (recall@5)")
-    parser.add_argument("--docs-dtype", default="float32", choices=["float32", "bfloat16"],
-                        help="Number format for the embedding model on CPU. float32 (default) "
-                             "needs ~9 GB RAM and is fast on most CPUs; bfloat16 halves the "
-                             "memory but is emulated (much slower) on CPUs without native bf16")
-    parser.add_argument("--discover-sec", metavar="TICKER",
-                        help="Show what SEC EDGAR returns for a ticker: CIK, recent form types, "
-                             "and the first Form 4 parsed")
-    parser.add_argument("--check-docs-model", action="store_true",
-                        help="Load the page-embedding model (downloads on first use), embed two "
-                             "generated pages and check a question finds the right one")
     parser.add_argument("--check-timesfm", action="store_true",
                         help="Load the TimesFM model (downloads the weights on first use) and "
                              "forecast a known test series, to prove the install works")
@@ -147,48 +126,6 @@ def discover_fundamentals(settings, symbol: str) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"  failed: {type(exc).__name__}: {exc}")
     print()
-    return 0
-
-
-def discover_session(settings, symbol: str, day_text: str) -> int:
-    """Print what LSE's daily bar for DAY is made of (regular vs extended hours)."""
-    from datetime import date, timedelta
-
-    from pipeline.providers import get_provider
-    from pipeline.session_check import session_summary
-
-    day = date.fromisoformat(day_text)
-    lse = get_provider("lse", settings)
-    # 20:00 New York is already the next day in UTC, so fetch two days and filter.
-    intraday = lse.intraday(symbol, "5m", day.isoformat(), (day + timedelta(days=2)).isoformat())
-    daily_frame = lse.intraday(symbol, "1d", day.isoformat(), (day + timedelta(days=1)).isoformat())
-    daily = None
-    if not daily_frame.empty:
-        same_day = daily_frame[daily_frame["timestamp"].dt.date == day]
-        if not same_day.empty:
-            daily = {k: float(same_day.iloc[0][k]) for k in ("open", "high", "low", "close", "volume")}
-
-    summary = session_summary(intraday, daily, day, settings.data.market_timezone)
-    print(f"\n== {symbol} {day} — LSE 5-minute candles, New York time ==")
-    if "error" in summary:
-        print(f"  {summary['error']}\n")
-        return 1
-    for name in ("pre_market", "regular", "after_hours", "whole_day"):
-        p = summary[name]
-        if p is None:
-            print(f"  {name:<12} (no bars)")
-            continue
-        print(f"  {name:<12} {p['first_bar']}-{p['last_bar']}  open {p['open']:.2f}  "
-              f"close {p['close']:.2f}  high {p['high']:.2f}  low {p['low']:.2f}  "
-              f"volume {p['volume']:,.0f}  ({p['bars']} bars)")
-    if daily is None:
-        print("  daily bar   (none for this day)\n")
-        return 0
-    print(f"  daily bar    open {daily['open']:.2f}  close {daily['close']:.2f}  "
-          f"high {daily['high']:.2f}  low {daily['low']:.2f}  volume {daily['volume']:,.0f}")
-    print(f"\n  daily close matches: {', '.join(summary['daily_close_matches'])}")
-    print(f"  daily volume = {summary['daily_volume_vs_regular_pct']}% of regular-session volume, "
-          f"{summary['daily_volume_vs_whole_day_pct']}% of the whole day\n")
     return 0
 
 
@@ -398,37 +335,6 @@ def check_docs_model(settings, dtype: str) -> int:
     return 0
 
 
-def seed_saved_answers(settings, ticker: str) -> int:
-    """Turn earlier successful TradingView payloads into saved answers."""
-    from datetime import datetime, timezone
-
-    from pipeline.providers.tradingview_data import (
-        EARNINGS_TOOL, SYMBOL_DATA_TOOL, earnings_from_payload, market_cap_from_payload)
-    from pipeline.stages.validate import SAVED_ANSWERS, SavedAnswers
-
-    symbol = settings.validate.tradingview_symbol(ticker)
-    saved = SavedAnswers(settings.cache_dir / ticker / SAVED_ANSWERS)
-    folder = settings.log_dir / "tradingview_payloads"
-    seeded = 0
-    for kind, tool, parse in (("market_cap", SYMBOL_DATA_TOOL, market_cap_from_payload),
-                              ("next_earnings", EARNINGS_TOOL, earnings_from_payload)):
-        path = folder / f"{tool}.json"
-        if not path.exists():
-            print(f"  {kind:<14} no file {path}")
-            continue
-        try:
-            value = parse(json.loads(path.read_text(encoding="utf-8")), symbol)
-        except (ValueError, PipelineError) as exc:
-            print(f"  {kind:<14} not usable: {exc}")
-            continue
-        when = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
-        saved.put(symbol, kind, value, when)
-        seeded += 1
-        print(f"  {kind:<14} saved (answer from {when:%Y-%m-%d %H:%M} UTC)")
-    print(f"\n{seeded} answer(s) saved to {saved.path}\n")
-    return 0 if seeded else 1
-
-
 def check_timesfm(settings) -> int:
     """Load the real model and forecast a series with a known answer."""
     import numpy as np
@@ -563,20 +469,9 @@ def main(argv: list[str] | None = None) -> int:
             log.error("%s", exc)
             return 1
 
-    if args.seed_saved_answers:
-        return seed_saved_answers(settings, args.seed_saved_answers.strip().upper())
-
     if args.check_timesfm:
         try:
             return check_timesfm(settings)
-        except PipelineError as exc:
-            log.error("%s", exc)
-            return 1
-
-    if args.discover_session:
-        try:
-            return discover_session(settings, args.discover_session[0].strip().upper(),
-                                    args.discover_session[1])
         except PipelineError as exc:
             log.error("%s", exc)
             return 1

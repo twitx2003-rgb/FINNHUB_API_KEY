@@ -36,9 +36,7 @@ before the next one starts.
 .venv\Scripts\python.exe run.py --tradingview-tools     # list TradingView MCP tools
 .venv\Scripts\python.exe run.py --tradingview-call TOOL key=value ...   # raw tool result
 .venv\Scripts\python.exe run.py --tradingview-token-status  # stored sign-in: expiry, refresh token (no secrets)
-.venv\Scripts\python.exe run.py --discover-session NVDA 2026-09-16  # is LSE's daily bar regular or extended hours
 .venv\Scripts\python.exe run.py --check-timesfm            # load TimesFM, forecast a known wave
-.venv\Scripts\python.exe run.py --seed-saved-answers NVDA   # bootstrap saved TradingView answers
 .venv\Scripts\python.exe run.py --check-docs-model          # load the page-embedding model, 2-page sanity check
 .venv\Scripts\python.exe run.py --docs-spike                # recall@5 on docs_input\*.pdf + questions.yaml
 .venv\Scripts\python.exe run.py --discover-sec NVDA         # SEC EDGAR: CIK, form types, newest Form 4
@@ -152,6 +150,10 @@ writing code against it. Do not trust README summaries or memory.
     Form 4 parsed. **Institutional holdings not built yet:** 13F is filed by the
     institutions (needs SEC's quarterly bulk 13F data sets); whether SC 13G/13D (>5%
     holders) show up in the company's own submissions is what `--discover-sec` will show.
+- **Cleanup (user request, 2026-09-23):** removed the one-off commands `--discover-session`
+  (its job — proving LSE daily bars include extended hours — is done; `session_summary`
+  and `LSEProvider.intraday` went with it) and `--seed-saved-answers` (bootstrap done),
+  and the Finnhub licence row (never chosen). Recoverable from git history.
 - **TradingView scanner 429 is chronic** (hours at a time; blocked phase-3 runs twice).
   **User decision: keep last answers.** `validate.SavedAnswers` stores each successful
   market-cap / earnings answer per symbol in `cache/<TICKER>/tradingview_reference.json`;

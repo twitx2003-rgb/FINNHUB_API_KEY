@@ -166,15 +166,6 @@ class LSEProvider(MarketDataProvider):
         # chronological order. The desc request is purely to pin the window end.
         return frame.sort_values("timestamp").reset_index(drop=True)
 
-    def intraday(self, symbol: str, timeframe: str, start: str, end: str) -> pd.DataFrame:
-        """Intraday candles between two ISO dates, oldest first (diagnostics only)."""
-        rows = self._call("candles", symbol=symbol, timeframe=timeframe, start=start, end=end,
-                          limit=_MAX_ROWS, order="asc")
-        if len(rows) >= _MAX_ROWS:
-            raise ProviderError(f"lse candles({symbol}, {timeframe}): {_MAX_ROWS}-row cap hit; "
-                                "narrow the window")
-        return _candle_frame(rows, f"lse candles({symbol}, {timeframe})")
-
     # ---------------------------------------------------------------- options
     def options_chain(self, underlying: str, max_dte: int) -> pd.DataFrame:
         rows = self._chain_rows(underlying, 0, max_dte)

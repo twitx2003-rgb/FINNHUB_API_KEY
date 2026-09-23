@@ -282,7 +282,7 @@ def test_tradingview_symbol_mapping(ctx):
 
 def test_unknown_validate_provider_is_rejected(ctx):
     with pytest.raises(ConfigError):
-        dataclasses.replace(ctx.settings.validate, provider="finnhub")
+        dataclasses.replace(ctx.settings.validate, provider="unknown")
 
 
 # ------------------------------------------------------------ saved answers
@@ -329,20 +329,3 @@ def test_saved_answers_are_per_symbol(ctx):
     saved.put("NASDAQ:OTHER", "market_cap", {"market_cap": 1.0, "price": 1.0}, now)
     assert saved.get("NASDAQ:TEST", "market_cap", 7, now) is None
 
-
-def test_seed_saved_answers_from_earlier_payloads(tmp_path, capsys):
-    import run
-
-    shutil.copy(ROOT / "config.yaml", tmp_path / "config.yaml")
-    settings = load_settings(tmp_path / "config.yaml", root=tmp_path)
-    folder = settings.log_dir / "tradingview_payloads"
-    folder.mkdir(parents=True)
-    (folder / "mcp-tv-get-symbol-data.json").write_text(json.dumps(SYMBOL_DATA))
-    earnings = json.loads(json.dumps(EARNINGS))
-    earnings["data"]["earnings"][0]["symbol"] = "NASDAQ:TEST"
-    (folder / "mcp-tv-get-earnings-calendar.json").write_text(json.dumps(earnings))
-
-    assert run.seed_saved_answers(settings, "TEST") == 0
-    saved = json.loads((settings.cache_dir / "TEST" / "tradingview_reference.json").read_text())
-    assert saved["NASDAQ:TEST"]["market_cap"]["value"] == {"market_cap": 5.0e10, "price": 50.0}
-    assert saved["NASDAQ:TEST"]["next_earnings"]["value"]["date"] == "2026-07-29"
