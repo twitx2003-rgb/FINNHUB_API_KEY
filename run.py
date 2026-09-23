@@ -22,7 +22,7 @@ from pipeline.stages import build_registry, resolve_stages
 log = logging.getLogger("run")
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="run.py", description="Personal capital-market research pipeline"
     )
@@ -52,6 +52,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tradingview-token-status", action="store_true",
                         help="Show whether a TradingView sign-in is stored, when it expires and "
                              "whether it can be renewed (prints no secrets)")
+    parser.add_argument("--docs-spike", action="store_true",
+                        help="Phase 4 spike: measure whether page-screenshot retrieval finds the "
+                             "right page in docs_input/*.pdf for the questions in "
+                             "docs_input/questions.yaml (recall@5)")
+    parser.add_argument("--docs-dtype", default="float32", choices=["float32", "bfloat16"],
+                        help="Number format for the embedding model on CPU. float32 (default) "
+                             "needs ~9 GB RAM and is fast on most CPUs; bfloat16 halves the "
+                             "memory but is emulated (much slower) on CPUs without native bf16")
+    parser.add_argument("--discover-sec", metavar="TICKER",
+                        help="Show what SEC EDGAR returns for a ticker: CIK, recent form types, "
+                             "and the first Form 4 parsed")
+    parser.add_argument("--check-docs-model", action="store_true",
+                        help="Load the page-embedding model (downloads on first use), embed two "
+                             "generated pages and check a question finds the right one")
     parser.add_argument("--check-timesfm", action="store_true",
                         help="Load the TimesFM model (downloads the weights on first use) and "
                              "forecast a known test series, to prove the install works")
@@ -59,7 +73,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Run the pipeline against synthetic data (no API key, no network) "
                              "to verify the installation, then exit")
     parser.add_argument("-v", "--verbose", action="store_true")
-    return parser.parse_args(argv)
+    return parser
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
 
 
 _DESCRIPTIVE_KEYS = ("description", "title", "name", "label", "long_name", "category",
