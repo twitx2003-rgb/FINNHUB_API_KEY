@@ -30,12 +30,14 @@ from .base import Stage, StageResult
 log = logging.getLogger(__name__)
 
 ARTIFACT = "extract_insider"
+SEC_QUESTION = ("SEC asks everyone using its data for a name and e-mail (sent only to sec.gov).\nType yours, for example:  Jane Doe jane@example.com")
 COLUMNS = ["accession", "insider", "role", "date", "code", "meaning", "direction", "shares",
            "price", "shares_after", "ownership", "plan_10b5_1"]
 
 
 def default_client(ctx: RunContext) -> SecClient:
-    return SecClient(ctx.settings.env("SEC_USER_AGENT"), ctx.settings.cache_dir / "sec")
+    agent = ctx.settings.env_or_ask("SEC_USER_AGENT", SEC_QUESTION, must_contain="@")
+    return SecClient(agent, ctx.settings.cache_dir / "sec")
 
 
 class ExtractStage(Stage):

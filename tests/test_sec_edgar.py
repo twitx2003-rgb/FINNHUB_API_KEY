@@ -238,3 +238,38 @@ def test_archive_url_uses_the_raw_xml():
     f = Filing("0001045810-26-000123", "4", date(2026, 9, 1), "xslF345X05/wk-form4_9.xml")
     assert archive_url(1045810, f) == ("https://www.sec.gov/Archives/edgar/data/1045810/"
                                        "000104581026000123/wk-form4_9.xml")
+
+
+# ------------------------------------------------------- asking for the UA
+def _settings(tmp_path, monkeypatch):
+    monkeypatch.delenv("SEC_USER_AGENT", raising=False)
+    shutil.copy(ROOT / "config.yaml", tmp_path / "config.yaml")
+    (tmp_path / ".env").write_text("LSE_API_KEY=x", encoding="utf-8")     # no trailing newline
+    return load_settings(tmp_path / "config.yaml", root=tmp_path)
+
+
+def test_missing_user_agent_is_asked_for_and_saved(tmp_path, monkeypatch, capsys):
+    settings = _settings(tmp_path, monkeypatch)
+    got = settings.env_or_ask("SEC_USER_AGENT", "q?", must_contain="@",
+                              ask=lambda prompt: "  Jane Doe jane@example.com ", is_interactive=True)
+    assert got == "Jane Doe jane@example.com"
+    assert (tmp_path / ".env").read_text(encoding="utf-8") == \
+        "LSE_API_KEY=x\nSEC_USER_AGENT=Jane Doe jane@example.com\n"
+    # asked once: now it comes from the environment
+    assert settings.env_or_ask("SEC_USER_AGENT", "q?", ask=lambda p: pytest.fail("asked again"),
+                               is_interactive=True) == got
+
+
+def test_bad_answer_saves_nothing(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    with pytest.raises(ConfigError, match="Nothing was saved"):
+        settings.env_or_ask("SEC_USER_AGENT", "q?", must_contain="@",
+                            ask=lambda p: "Jane Doe", is_interactive=True)
+    assert "SEC_USER_AGENT" not in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_no_terminal_means_no_question(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    with pytest.raises(ConfigError, match="not set"):
+        settings.env_or_ask("SEC_USER_AGENT", "q?", ask=lambda p: pytest.fail("asked"),
+                            is_interactive=False)

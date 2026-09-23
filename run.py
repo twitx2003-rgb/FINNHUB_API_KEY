@@ -244,7 +244,10 @@ def discover_sec(settings, ticker: str) -> int:
     from pipeline.providers.sec_edgar import (
         SUBMISSIONS_URL, TICKERS_URL, SecClient, archive_url, cik_for, parse_form4, recent_filings)
 
-    client = SecClient(settings.env("SEC_USER_AGENT"), settings.cache_dir / "sec")
+    from pipeline.stages.extract import SEC_QUESTION
+
+    agent = settings.env_or_ask("SEC_USER_AGENT", SEC_QUESTION, must_contain="@")
+    client = SecClient(agent, settings.cache_dir / "sec")
     cik = cik_for(client.json(TICKERS_URL), ticker)
     submissions = client.json(SUBMISSIONS_URL.format(cik=cik))
     print(f"\n== SEC EDGAR: {ticker} -> CIK {cik} ({submissions.get('name', '?')})")

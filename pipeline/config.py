@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -153,6 +154,29 @@ class Settings:
                 f"{name} is not set. Copy .env.example to .env and fill it in."
             )
         return value
+
+    def env_or_ask(self, name: str, question: str, *, must_contain: str = "",
+                   ask=input, is_interactive=None) -> str:
+        """Like env(), but when the value is missing and a person is at the
+        terminal, ask for it once and save it to .env so it is not asked again."""
+        value = os.environ.get(name)
+        if value:
+            return value
+        interactive = sys.stdin.isatty() if is_interactive is None else is_interactive
+        if not interactive:
+            raise ConfigError(f"{name} is not set in {self.root / '.env'}")
+        answer = ask(f"\n{question}\n> ").strip()
+        if not answer or (must_contain and must_contain not in answer):
+            raise ConfigError(f"{name}: '{answer}' is not valid — expected something containing "
+                              f"'{must_contain}'. Nothing was saved.")
+        path = self.root / ".env"
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        prefix = "" if not existing or existing.endswith("\n") else "\n"
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{prefix}{name}={answer}\n")
+        os.environ[name] = answer
+        print(f"Saved {name} to {path}\n")
+        return answer
 
 
 def _section(raw: dict[str, Any], key: str) -> dict[str, Any]:

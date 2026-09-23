@@ -150,6 +150,15 @@ writing code against it. Do not trust README summaries or memory.
     Form 4 parsed. **Institutional holdings not built yet:** 13F is filed by the
     institutions (needs SEC's quarterly bulk 13F data sets); whether SC 13G/13D (>5%
     holders) show up in the company's own submissions is what `--discover-sec` will show.
+- **SEC_USER_AGENT is asked for, not hand-edited:** the user struggled to add it to .env
+  (typed the line into PowerShell). `Settings.env_or_ask` prompts at an interactive
+  terminal, validates (must contain "@"), appends to .env (newline-safe) and sets it for
+  the run; with no terminal it raises ConfigError. Used by the extract stage and
+  `--discover-sec`. Never fill it in with the user's e-mail on their behalf.
+- **Working style the user asked for:** "whatever you can run yourself, run it". This
+  cloud container cannot reach the user's machine or LSE/SEC/TradingView/HF, so every
+  live run needs Claude Code running locally (VS Code) or the user pasting output.
+  Prefer code that asks/does things itself over instructions to edit files.
 - **Cleanup (user request, 2026-09-23):** removed the one-off commands `--discover-session`
   (its job — proving LSE daily bars include extended hours — is done; `session_summary`
   and `LSEProvider.intraday` went with it) and `--seed-saved-answers` (bootstrap done),
